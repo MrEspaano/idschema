@@ -14,16 +14,117 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      term_plans: {
+        Row: {
+          area: string
+          color: string
+          created_at: string
+          description: string
+          id: string
+          is_assessment: boolean
+          sort_order: number
+          updated_at: string
+          weeks: string
+        }
+        Insert: {
+          area: string
+          color?: string
+          created_at?: string
+          description?: string
+          id?: string
+          is_assessment?: boolean
+          sort_order?: number
+          updated_at?: string
+          weeks: string
+        }
+        Update: {
+          area?: string
+          color?: string
+          created_at?: string
+          description?: string
+          id?: string
+          is_assessment?: boolean
+          sort_order?: number
+          updated_at?: string
+          weeks?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      weekly_schedules: {
+        Row: {
+          activity: string
+          cancelled: boolean
+          changing_room: string
+          class_name: string
+          code: string
+          created_at: string
+          day: string
+          hall: string
+          id: string
+          updated_at: string
+          week_number: number
+        }
+        Insert: {
+          activity: string
+          cancelled?: boolean
+          changing_room?: string
+          class_name: string
+          code?: string
+          created_at?: string
+          day: string
+          hall?: string
+          id?: string
+          updated_at?: string
+          week_number: number
+        }
+        Update: {
+          activity?: string
+          cancelled?: boolean
+          changing_room?: string
+          class_name?: string
+          code?: string
+          created_at?: string
+          day?: string
+          hall?: string
+          id?: string
+          updated_at?: string
+          week_number?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +251,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "user"],
+    },
   },
 } as const

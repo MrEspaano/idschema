@@ -1,13 +1,54 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ChevronLeft, ChevronRight, MapPin, DoorOpen, KeyRound, XCircle, Calendar } from "lucide-react";
 import Layout from "@/components/Layout";
+import { supabase } from "@/integrations/supabase/client";
 import { classes, getWeekSchedule, getCurrentWeek, type ClassName } from "@/lib/mockData";
+
+interface ScheduleDay {
+  day: string;
+  activity: string;
+  hall: string;
+  changingRoom: string;
+  code: string;
+  cancelled?: boolean;
+}
 
 const WeeklySchedule = () => {
   const [selectedClass, setSelectedClass] = useState<ClassName | null>(null);
   const [currentWeek, setCurrentWeek] = useState(getCurrentWeek());
+  const [days, setDays] = useState<ScheduleDay[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const schedule = selectedClass ? getWeekSchedule(currentWeek, selectedClass) : null;
+  useEffect(() => {
+    if (!selectedClass) return;
+    
+    const fetchSchedule = async () => {
+      setLoading(true);
+      const { data } = await supabase
+        .from("weekly_schedules")
+        .select("*")
+        .eq("class_name", selectedClass)
+        .eq("week_number", currentWeek)
+        .order("day");
+
+      if (data && data.length > 0) {
+        setDays(data.map((r: any) => ({
+          day: r.day,
+          activity: r.activity,
+          hall: r.hall,
+          changingRoom: r.changing_room,
+          code: r.code,
+          cancelled: r.cancelled,
+        })));
+      } else {
+        // Fallback to mock data
+        const mock = getWeekSchedule(currentWeek, selectedClass);
+        setDays(mock.days);
+      }
+      setLoading(false);
+    };
+    fetchSchedule();
+  }, [selectedClass, currentWeek]);
 
   return (
     <Layout>
@@ -64,55 +105,58 @@ const WeeklySchedule = () => {
               </button>
             </div>
 
-            {/* Schedule cards */}
-            <div className="space-y-3">
-              {schedule?.days.map((day, i) => (
-                <div
-                  key={i}
-                  className={`bg-card border rounded-2xl p-5 space-y-3 ${
-                    day.cancelled ? "opacity-60" : ""
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-bold text-lg text-card-foreground">{day.day}</h3>
-                    {day.cancelled && (
-                      <span className="flex items-center gap-1 text-xs font-semibold text-cancelled bg-cancelled/10 px-2.5 py-1 rounded-full">
-                        <XCircle className="w-3.5 h-3.5" />
-                        Inställd
-                      </span>
-                    )}
-                  </div>
+            {loading ? (
+              <div className="text-center py-8 text-muted-foreground">Laddar schema...</div>
+            ) : (
+              <div className="space-y-3">
+                {days.map((day, i) => (
+                  <div
+                    key={i}
+                    className={`bg-card border rounded-2xl p-5 space-y-3 ${
+                      day.cancelled ? "opacity-60" : ""
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-bold text-lg text-card-foreground">{day.day}</h3>
+                      {day.cancelled && (
+                        <span className="flex items-center gap-1 text-xs font-semibold text-cancelled bg-cancelled/10 px-2.5 py-1 rounded-full">
+                          <XCircle className="w-3.5 h-3.5" />
+                          Inställd
+                        </span>
+                      )}
+                    </div>
 
-                  <div className="text-xl font-semibold text-primary">
-                    {day.cancelled ? <s>{day.activity}</s> : day.activity}
-                  </div>
+                    <div className="text-xl font-semibold text-primary">
+                      {day.cancelled ? <s>{day.activity}</s> : day.activity}
+                    </div>
 
-                  <div className="grid grid-cols-3 gap-3 pt-1">
-                    <div className="flex items-start gap-2">
-                      <MapPin className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Sal</p>
-                        <p className="text-sm font-medium text-card-foreground">{day.hall}</p>
+                    <div className="grid grid-cols-3 gap-3 pt-1">
+                      <div className="flex items-start gap-2">
+                        <MapPin className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className="text-xs text-muted-foreground">Sal</p>
+                          <p className="text-sm font-medium text-card-foreground">{day.hall}</p>
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <DoorOpen className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Omkl.</p>
-                        <p className="text-sm font-medium text-card-foreground">{day.changingRoom}</p>
+                      <div className="flex items-start gap-2">
+                        <DoorOpen className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className="text-xs text-muted-foreground">Omkl.</p>
+                          <p className="text-sm font-medium text-card-foreground">{day.changingRoom}</p>
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <KeyRound className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Kod</p>
-                        <p className="text-sm font-bold text-primary">{day.code}</p>
+                      <div className="flex items-start gap-2">
+                        <KeyRound className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className="text-xs text-muted-foreground">Kod</p>
+                          <p className="text-sm font-bold text-primary">{day.code}</p>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </>
         )}
 

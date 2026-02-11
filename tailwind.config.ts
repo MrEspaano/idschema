@@ -47,6 +47,19 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        sport: {
+          DEFAULT: "hsl(var(--sport))",
+          foreground: "hsl(var(--sport-foreground))",
+        },
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          foreground: "hsl(var(--warning-foreground))",
+        },
+        assessment: {
+          DEFAULT: "hsl(var(--assessment))",
+          foreground: "hsl(var(--assessment-foreground))",
+        },
+        cancelled: "hsl(var(--cancelled))",
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
           foreground: "hsl(var(--sidebar-foreground))",

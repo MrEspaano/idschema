@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Home, Calendar, ClipboardList } from "lucide-react";
+import { Home, Calendar, ClipboardList, Settings } from "lucide-react";
 
 const Layout = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation();
@@ -20,6 +20,9 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
               <span className="text-primary-foreground font-bold text-sm">IH</span>
             </div>
             <span className="font-semibold text-foreground text-lg">Idrott & Hälsa</span>
+          </Link>
+          <Link to="/admin/login" className="text-muted-foreground hover:text-foreground transition-colors">
+            <Settings className="w-5 h-5" />
           </Link>
         </div>
       </header>

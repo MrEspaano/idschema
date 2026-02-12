@@ -2,23 +2,28 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, Trash2, Save, ArrowLeft } from "lucide-react";
+import { Save, ArrowLeft, AlertTriangle } from "lucide-react";
 import Layout from "@/components/Layout";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 const CLASSES = ["7A", "7F", "8B", "8C", "8H"];
+const CHANGING_ROOMS = ["1&2", "3&4", "5&6"];
 
-interface ScheduleRow {
-  id?: string;
-  week_number: number;
+interface ClassDayHall {
   class_name: string;
   day: string;
-  activity: string;
   hall: string;
+}
+
+interface LessonRow {
+  id?: string;
+  day: string;
+  hall: string; // derived from class_day_halls
+  activity: string;
   changing_room: string;
-  code: string;
   cancelled: boolean;
+  is_theory: boolean;
 }
 
 const AdminSchedule = () => {
@@ -30,68 +35,133 @@ const AdminSchedule = () => {
     const start = new Date(now.getFullYear(), 0, 1);
     return Math.ceil(((now.getTime() - start.getTime()) / 604800000) + 1);
   });
-  const [rows, setRows] = useState<ScheduleRow[]>([]);
+  const [classDayHalls, setClassDayHalls] = useState<ClassDayHall[]>([]);
+  const [rows, setRows] = useState<LessonRow[]>([]);
   const [saving, setSaving] = useState(false);
+  const [conflicts, setConflicts] = useState<string[]>([]);
 
   useEffect(() => {
     if (!authLoading && !isAdmin) navigate("/admin/login");
   }, [authLoading, isAdmin, navigate]);
 
+  // Load class structure
   useEffect(() => {
-    loadSchedule();
-  }, [selectedClass, weekNumber]);
+    const load = async () => {
+      const { data } = await supabase
+        .from("class_day_halls")
+        .select("*")
+        .eq("class_name", selectedClass)
+        .order("day");
+      if (data) setClassDayHalls(data);
+    };
+    load();
+  }, [selectedClass]);
 
-  const loadSchedule = async () => {
-    const { data } = await supabase
-      .from("weekly_schedules")
-      .select("*")
-      .eq("class_name", selectedClass)
-      .eq("week_number", weekNumber)
-      .order("day");
-    if (data) setRows(data as ScheduleRow[]);
-  };
+  // Load existing schedule for this class+week and merge with structure
+  useEffect(() => {
+    if (classDayHalls.length === 0) return;
+    const load = async () => {
+      const { data: schedules } = await supabase
+        .from("weekly_schedules")
+        .select("*")
+        .eq("class_name", selectedClass)
+        .eq("week_number", weekNumber);
 
-  const addRow = () => {
-    setRows([...rows, {
-      week_number: weekNumber,
-      class_name: selectedClass,
-      day: "",
-      activity: "",
-      hall: "",
-      changing_room: "",
-      code: "",
-      cancelled: false,
-    }]);
-  };
+      const dayOrder = ["Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag"];
+      const merged: LessonRow[] = classDayHalls
+        .sort((a, b) => dayOrder.indexOf(a.day) - dayOrder.indexOf(b.day))
+        .map((cdh) => {
+          const existing = schedules?.find((s: any) => s.day === cdh.day);
+          return {
+            id: existing?.id,
+            day: cdh.day,
+            hall: cdh.hall,
+            activity: existing?.activity || "",
+            changing_room: existing?.changing_room || (cdh.hall === "Gy-sal" ? "–" : ""),
+            cancelled: existing?.cancelled || false,
+            is_theory: existing?.is_theory || false,
+          };
+        });
+      setRows(merged);
+    };
+    load();
+  }, [classDayHalls, weekNumber, selectedClass]);
 
-  const updateRow = (index: number, field: keyof ScheduleRow, value: string | boolean | number) => {
+  // Check for changing room conflicts
+  useEffect(() => {
+    const checkConflicts = async () => {
+      if (rows.length === 0) return;
+      // Get all schedules for this week (all classes)
+      const { data: allSchedules } = await supabase
+        .from("weekly_schedules")
+        .select("class_name, day, changing_room")
+        .eq("week_number", weekNumber)
+        .neq("class_name", selectedClass);
+
+      const warnings: string[] = [];
+      for (const row of rows) {
+        if (!row.changing_room || row.changing_room === "–") continue;
+        const conflict = allSchedules?.find(
+          (s: any) => s.day === row.day && s.changing_room === row.changing_room
+        );
+        if (conflict) {
+          warnings.push(
+            `${row.day}: Omklädningsrum ${row.changing_room} används redan av ${conflict.class_name}`
+          );
+        }
+      }
+      setConflicts(warnings);
+    };
+    checkConflicts();
+  }, [rows, weekNumber, selectedClass]);
+
+  const updateRow = (index: number, field: keyof LessonRow, value: string | boolean) => {
     const updated = [...rows];
     (updated[index] as any)[field] = value;
+
+    // If hall is Gy-sal, force changing room to "–"
+    if (field === "changing_room" && updated[index].hall === "Gy-sal") {
+      updated[index].changing_room = "–";
+    }
+
     setRows(updated);
   };
 
-  const removeRow = (index: number) => {
-    setRows(rows.filter((_, i) => i !== index));
-  };
-
   const save = async () => {
+    // Validate: Freja halls require changing room
+    for (const row of rows) {
+      if (row.activity && row.hall !== "Gy-sal" && (!row.changing_room || row.changing_room === "–" || row.changing_room === "")) {
+        toast.error(`${row.day}: Freja-lokaler kräver omklädningsrum`);
+        return;
+      }
+    }
+
     setSaving(true);
-    // Delete existing rows for this class+week
+    // Delete existing for this class+week
     await supabase
       .from("weekly_schedules")
       .delete()
       .eq("class_name", selectedClass)
       .eq("week_number", weekNumber);
 
-    // Insert all current rows
-    if (rows.length > 0) {
-      const toInsert = rows.map(({ id, ...rest }) => rest);
+    // Insert rows that have activity
+    const toInsert = rows
+      .filter((r) => r.activity.trim() !== "")
+      .map(({ id, hall, ...rest }) => ({
+        ...rest,
+        week_number: weekNumber,
+        class_name: selectedClass,
+        hall: hall, // store for legacy/reference
+        code: "", // codes come from changing_room_codes table
+      }));
+
+    if (toInsert.length > 0) {
       const { error } = await supabase.from("weekly_schedules").insert(toInsert);
       if (error) {
         toast.error("Kunde inte spara. Försök igen.");
+        console.error(error);
       } else {
         toast.success("Schemat sparat!");
-        loadSchedule();
       }
     } else {
       toast.success("Schemat rensat!");
@@ -111,11 +181,11 @@ const AdminSchedule = () => {
           </Link>
           <div>
             <h1 className="text-xl font-bold text-foreground">Redigera veckoschema</h1>
-            <p className="text-sm text-muted-foreground">Välj klass och vecka</p>
+            <p className="text-sm text-muted-foreground">Aktiviteter fylls i per klass och vecka</p>
           </div>
         </div>
 
-        {/* Filters */}
+        {/* Class filter */}
         <div className="flex flex-wrap gap-2">
           {CLASSES.map((cls) => (
             <button
@@ -132,6 +202,7 @@ const AdminSchedule = () => {
           ))}
         </div>
 
+        {/* Week selector */}
         <div className="flex items-center gap-3">
           <label className="text-sm font-medium text-foreground">Vecka:</label>
           <input
@@ -144,13 +215,38 @@ const AdminSchedule = () => {
           />
         </div>
 
-        {/* Schedule rows */}
+        {/* Conflict warnings */}
+        {conflicts.length > 0 && (
+          <div className="bg-destructive/10 border border-destructive/30 rounded-xl p-4 space-y-1">
+            <div className="flex items-center gap-2 text-destructive font-semibold text-sm">
+              <AlertTriangle className="w-4 h-4" />
+              Omklädningsrumskonflikt
+            </div>
+            {conflicts.map((c, i) => (
+              <p key={i} className="text-sm text-destructive/80">{c}</p>
+            ))}
+          </div>
+        )}
+
+        {/* Lesson rows */}
         <div className="space-y-3">
           {rows.map((row, i) => (
             <div key={i} className="bg-card border rounded-xl p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-muted-foreground">Lektion {i + 1}</span>
-                <div className="flex items-center gap-2">
+                <div>
+                  <span className="font-bold text-card-foreground">{row.day}</span>
+                  <span className="ml-2 text-sm text-muted-foreground">– {row.hall}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={row.is_theory}
+                      onChange={(e) => updateRow(i, "is_theory", e.target.checked)}
+                      className="rounded"
+                    />
+                    Teoripass
+                  </label>
                   <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <input
                       type="checkbox"
@@ -160,56 +256,48 @@ const AdminSchedule = () => {
                     />
                     Inställd
                   </label>
-                  <button onClick={() => removeRow(i)} className="p-1.5 text-destructive hover:bg-destructive/10 rounded-lg transition-colors">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-2">
+
+              <div className="grid grid-cols-1 gap-2">
                 <input
-                  placeholder="Dag (t.ex. Tisdag)"
-                  value={row.day}
-                  onChange={(e) => updateRow(i, "day", e.target.value)}
-                  className="px-3 py-2 rounded-lg border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <input
-                  placeholder="Aktivitet"
+                  placeholder="Aktivitet (t.ex. Fotboll)"
                   value={row.activity}
                   onChange={(e) => updateRow(i, "activity", e.target.value)}
                   className="px-3 py-2 rounded-lg border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
-                <input
-                  placeholder="Sal"
-                  value={row.hall}
-                  onChange={(e) => updateRow(i, "hall", e.target.value)}
-                  className="px-3 py-2 rounded-lg border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <input
-                  placeholder="Omklädningsrum"
-                  value={row.changing_room}
-                  onChange={(e) => updateRow(i, "changing_room", e.target.value)}
-                  className="px-3 py-2 rounded-lg border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <input
-                  placeholder="Kod"
-                  value={row.code}
-                  onChange={(e) => updateRow(i, "code", e.target.value)}
-                  className="px-3 py-2 rounded-lg border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                />
+
+                {row.hall !== "Gy-sal" && (
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Omklädningsrum</label>
+                    <select
+                      value={row.changing_room}
+                      onChange={(e) => updateRow(i, "changing_room", e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      <option value="">Välj omklädningsrum</option>
+                      {CHANGING_ROOMS.map((cr) => (
+                        <option key={cr} value={cr}>{cr}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {row.hall === "Gy-sal" && (
+                  <p className="text-xs text-muted-foreground italic">
+                    Gy-sal – inget omklädningsrum eller kod
+                  </p>
+                )}
               </div>
             </div>
           ))}
         </div>
 
-        <div className="flex gap-2">
-          <button
-            onClick={addRow}
-            className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-border text-muted-foreground hover:border-primary hover:text-primary transition-colors font-medium text-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Lägg till lektion
-          </button>
-        </div>
+        {rows.length === 0 && (
+          <div className="text-center py-8 text-muted-foreground">
+            Ingen klassstruktur hittad. Lägg till dagar under "Klassstruktur".
+          </div>
+        )}
 
         <button
           onClick={save}

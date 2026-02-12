@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { Calendar, ClipboardList, LogOut, ChevronRight } from "lucide-react";
+import { Calendar, ClipboardList, LogOut, ChevronRight, KeyRound, Building2 } from "lucide-react";
 import Layout from "@/components/Layout";
 import { useEffect } from "react";
 
@@ -14,6 +14,13 @@ const AdminDashboard = () => {
 
   if (loading) return <Layout><div className="text-center py-16 text-muted-foreground">Laddar...</div></Layout>;
   if (!isAdmin) return null;
+
+  const links = [
+    { to: "/admin/veckoschema", icon: Calendar, label: "Veckoscheman", desc: "Redigera aktiviteter per klass och vecka", color: "primary" },
+    { to: "/admin/terminsplanering", icon: ClipboardList, label: "Terminsplanering", desc: "Uppdatera arbetsområden och bedömningar", color: "accent" },
+    { to: "/admin/klassstruktur", icon: Building2, label: "Klassstruktur", desc: "Fasta dagar och lokaler per klass", color: "primary" },
+    { to: "/admin/koder", icon: KeyRound, label: "Koddokument", desc: "Importera och hantera omklädningsrumskoder", color: "accent" },
+  ];
 
   return (
     <Layout>
@@ -33,35 +40,22 @@ const AdminDashboard = () => {
         </div>
 
         <div className="space-y-3">
-          <Link to="/admin/veckoschema" className="block">
-            <div className="bg-card border rounded-2xl p-5 card-hover flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <Calendar className="w-5 h-5 text-primary" />
+          {links.map((link) => (
+            <Link key={link.to} to={link.to} className="block">
+              <div className="bg-card border rounded-2xl p-5 card-hover flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className={`w-11 h-11 rounded-xl bg-${link.color}/10 flex items-center justify-center`}>
+                    <link.icon className={`w-5 h-5 text-${link.color}`} />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-card-foreground">{link.label}</h2>
+                    <p className="text-sm text-muted-foreground">{link.desc}</p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="font-semibold text-card-foreground">Veckoscheman</h2>
-                  <p className="text-sm text-muted-foreground">Redigera aktiviteter, salar och koder</p>
-                </div>
+                <ChevronRight className="w-5 h-5 text-muted-foreground" />
               </div>
-              <ChevronRight className="w-5 h-5 text-muted-foreground" />
-            </div>
-          </Link>
-
-          <Link to="/admin/terminsplanering" className="block">
-            <div className="bg-card border rounded-2xl p-5 card-hover flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-11 h-11 rounded-xl bg-accent/10 flex items-center justify-center">
-                  <ClipboardList className="w-5 h-5 text-accent" />
-                </div>
-                <div>
-                  <h2 className="font-semibold text-card-foreground">Terminsplanering</h2>
-                  <p className="text-sm text-muted-foreground">Uppdatera arbetsområden och bedömningar</p>
-                </div>
-              </div>
-              <ChevronRight className="w-5 h-5 text-muted-foreground" />
-            </div>
-          </Link>
+            </Link>
+          ))}
         </div>
       </div>
     </Layout>

@@ -14,6 +14,63 @@ export type Database = {
   }
   public: {
     Tables: {
+      changing_room_codes: {
+        Row: {
+          changing_room: string
+          code: string
+          created_at: string
+          day: string
+          id: string
+          updated_at: string
+          week_number: number
+        }
+        Insert: {
+          changing_room: string
+          code: string
+          created_at?: string
+          day: string
+          id?: string
+          updated_at?: string
+          week_number: number
+        }
+        Update: {
+          changing_room?: string
+          code?: string
+          created_at?: string
+          day?: string
+          id?: string
+          updated_at?: string
+          week_number?: number
+        }
+        Relationships: []
+      }
+      class_day_halls: {
+        Row: {
+          class_name: string
+          created_at: string
+          day: string
+          hall: string
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          class_name: string
+          created_at?: string
+          day: string
+          hall: string
+          id?: string
+          updated_at?: string
+        }
+        Update: {
+          class_name?: string
+          created_at?: string
+          day?: string
+          hall?: string
+          id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       term_plans: {
         Row: {
           area: string
@@ -79,6 +136,7 @@ export type Database = {
           day: string
           hall: string
           id: string
+          is_theory: boolean
           updated_at: string
           week_number: number
         }
@@ -92,6 +150,7 @@ export type Database = {
           day: string
           hall?: string
           id?: string
+          is_theory?: boolean
           updated_at?: string
           week_number: number
         }
@@ -105,6 +164,7 @@ export type Database = {
           day?: string
           hall?: string
           id?: string
+          is_theory?: boolean
           updated_at?: string
           week_number?: number
         }

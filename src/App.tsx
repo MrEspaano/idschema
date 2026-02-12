@@ -11,6 +11,8 @@ import AdminLogin from "./pages/AdminLogin";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminSchedule from "./pages/AdminSchedule";
 import AdminTermPlan from "./pages/AdminTermPlan";
+import AdminCodes from "./pages/AdminCodes";
+import AdminClassStructure from "./pages/AdminClassStructure";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -30,6 +32,8 @@ const App = () => (
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/veckoschema" element={<AdminSchedule />} />
             <Route path="/admin/terminsplanering" element={<AdminTermPlan />} />
+            <Route path="/admin/koder" element={<AdminCodes />} />
+            <Route path="/admin/klassstruktur" element={<AdminClassStructure />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>

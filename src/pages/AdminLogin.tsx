@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { LogIn, AlertCircle } from "lucide-react";
@@ -9,8 +9,14 @@ const AdminLogin = () => {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const { signIn } = useAuth();
+  const { signIn, isAdmin, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!authLoading && isAdmin) {
+      navigate("/admin");
+    }
+  }, [authLoading, isAdmin, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,10 +26,9 @@ const AdminLogin = () => {
     const { error } = await signIn(email, password);
     if (error) {
       setError("Fel e-post eller lösenord.");
-    } else {
-      navigate("/admin");
+      setLoading(false);
     }
-    setLoading(false);
+    // Navigation handled by useEffect below after isAdmin is set
   };
 
   return (

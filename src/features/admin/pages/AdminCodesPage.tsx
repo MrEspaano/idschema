@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, ImageUp, Trash2, Upload } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import AppLayout from "@/shared/layout/AppLayout";
@@ -31,6 +31,7 @@ const AdminCodesPage = () => {
 
   const [codes, setCodes] = useState<CodeRow[]>([]);
   const [weekFilter, setWeekFilter] = useState<number | "">("");
+  const [isImageProcessing, setIsImageProcessing] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !isAdmin) {
@@ -57,47 +58,85 @@ const AdminCodesPage = () => {
     loadCodes();
   }, [loadCodes]);
 
+  const importRows = useCallback(
+    async (parsed: ParseResult) => {
+      const weeks = [...new Set(parsed.rows.map((row) => row.week_number))];
+
+      for (const week of weeks) {
+        await supabase.from("changing_room_codes").delete().eq("week_number", week);
+      }
+
+      const { error } = await supabase.from("changing_room_codes").insert(parsed.rows);
+
+      if (error) {
+        console.error(error);
+        toast.error("Kunde inte importera. Kontrollera formatet och försök igen.");
+        return;
+      }
+
+      toast.success(`${parsed.rows.length} koder importerade (${parsed.detectedFormat}).`);
+
+      if (parsed.skippedRows > 0) {
+        toast.info(
+          `${parsed.skippedRows} rader hoppades över eftersom de saknade vecka, dag, omklädningsrum eller kod.`,
+        );
+      }
+
+      await loadCodes();
+    },
+    [loadCodes],
+  );
+
   const handleCsvUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) {
       return;
     }
 
-    const content = await decodeFileContent(file);
-    const parsed = parseCodeDocument(content);
+    try {
+      const content = await decodeFileContent(file);
+      const parsed = parseCodeDocument(content);
 
-    if (!parsed || parsed.rows.length === 0) {
-      toast.error(
-        "Kunde inte tolka filen. Använd format: vecka;dag;omklädningsrum;kod eller vecka;dag;1&2;3&4;5&6.",
-      );
+      if (!parsed || parsed.rows.length === 0) {
+        toast.error(
+          "Kunde inte tolka filen. Använd format: vecka;dag;omklädningsrum;kod eller vecka;dag;1&2;3&4;5&6.",
+        );
+        return;
+      }
+
+      await importRows(parsed);
+    } finally {
       event.target.value = "";
+    }
+  };
+
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
       return;
     }
 
-    const weeks = [...new Set(parsed.rows.map((row) => row.week_number))];
+    setIsImageProcessing(true);
 
-    for (const week of weeks) {
-      await supabase.from("changing_room_codes").delete().eq("week_number", week);
-    }
+    try {
+      const extractedText = await extractTextFromImage(file);
+      const parsed = parseCodeDocument(extractedText) ?? parseCodeDocumentFromOcrText(extractedText);
 
-    const { error } = await supabase.from("changing_room_codes").insert(parsed.rows);
-
-    if (error) {
-      console.error(error);
-      toast.error("Kunde inte importera. Kontrollera formatet och försök igen.");
-    } else {
-      toast.success(
-        `${parsed.rows.length} koder importerade (${parsed.detectedFormat}).`,
-      );
-
-      if (parsed.skippedRows > 0) {
-        toast.info(`${parsed.skippedRows} rader hoppades över eftersom de saknade vecka, dag, omklädningsrum eller kod.`);
+      if (!parsed || parsed.rows.length === 0) {
+        toast.error(
+          "Kunde inte tolka bilden. Kontrollera att vecka, dag och koder syns tydligt och försök igen.",
+        );
+        return;
       }
 
-      await loadCodes();
+      await importRows(parsed);
+    } catch (error) {
+      console.error(error);
+      toast.error("Kunde inte läsa bilden. Försök med en skarpare skärmdump.");
+    } finally {
+      setIsImageProcessing(false);
+      event.target.value = "";
     }
-
-    event.target.value = "";
   };
 
   const deleteWeek = async (weekNumber: number) => {
@@ -138,14 +177,16 @@ const AdminCodesPage = () => {
           </Link>
           <div>
             <h1 className="text-xl font-bold tracking-tight">Koddokument</h1>
-            <p className="text-sm text-muted-foreground">Importera omklädningsrumskoder via CSV.</p>
+            <p className="text-sm text-muted-foreground">Importera omklädningsrumskoder via CSV eller bild.</p>
           </div>
         </header>
 
         <section className="space-y-3 rounded-xl border bg-card p-5">
-          <h2 className="font-semibold">Importera CSV</h2>
+          <h2 className="font-semibold">Importera koder</h2>
           <p className="text-sm text-muted-foreground">
-            Stödjer flera format, till exempel:
+            Stödjer CSV/TXT/TSV samt skärmdump av dokument.
+            <br />
+            Exempel CSV-format:
             <br />
             1) vecka;dag;omklädningsrum;kod
             <br />
@@ -154,11 +195,31 @@ const AdminCodesPage = () => {
             3) vecka;Måndag 1&2;Måndag 3&4;...;Fredag 5&6
           </p>
 
-          <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary">
-            <Upload className="h-4 w-4" />
-            Välj CSV-fil
-            <input type="file" accept=".csv,.txt,.tsv" onChange={handleCsvUpload} className="hidden" />
-          </label>
+          <div className="flex flex-wrap gap-3">
+            <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary">
+              <Upload className="h-4 w-4" />
+              Välj CSV-fil
+              <input type="file" accept=".csv,.txt,.tsv" onChange={handleCsvUpload} className="hidden" />
+            </label>
+
+            <label
+              className={
+                isImageProcessing
+                  ? "inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border px-4 py-3 text-sm font-medium text-muted-foreground opacity-60"
+                  : "inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+              }
+            >
+              <ImageUp className="h-4 w-4" />
+              {isImageProcessing ? "Läser bild..." : "Ladda upp skärmdump"}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={handleImageUpload}
+                className="hidden"
+                disabled={isImageProcessing}
+              />
+            </label>
+          </div>
         </section>
 
         <section className="flex items-center gap-3">
@@ -236,6 +297,19 @@ const decodeFileContent = async (file: File): Promise<string> => {
   return content;
 };
 
+const extractTextFromImage = async (file: File): Promise<string> => {
+  const { createWorker } = await import("tesseract.js");
+
+  const worker = await createWorker("swe+eng");
+
+  try {
+    const { data } = await worker.recognize(file);
+    return data.text ?? "";
+  } finally {
+    await worker.terminate();
+  }
+};
+
 const parseCodeDocument = (content: string): ParseResult | null => {
   const table = parseTable(content);
   if (table.length === 0) {
@@ -260,6 +334,135 @@ const parseCodeDocument = (content: string): ParseResult | null => {
   }
 
   return null;
+};
+
+const parseCodeDocumentFromOcrText = (text: string): ParseResult | null => {
+  const lines = text
+    .replace(/\u00A0/g, " ")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  if (lines.length === 0) {
+    return null;
+  }
+
+  const rows: ImportCodeRow[] = [];
+  let skippedRows = 0;
+  let currentWeek: number | null = null;
+  let currentDay: string | null = null;
+
+  for (const line of lines) {
+    const weekOnLine = extractWeekNumber(line);
+    if (weekOnLine) {
+      currentWeek = weekOnLine;
+    }
+
+    const dayOnLine = normalizeDay(line);
+    if (dayOnLine) {
+      currentDay = dayOnLine;
+    }
+
+    const targetWeek = weekOnLine ?? currentWeek;
+    const targetDay = dayOnLine ?? currentDay;
+
+    const explicitPairs = extractRoomCodePairs(line);
+    if (targetWeek && targetDay && explicitPairs.length > 0) {
+      for (const pair of explicitPairs) {
+        rows.push({
+          week_number: targetWeek,
+          day: targetDay,
+          changing_room: pair.room,
+          code: pair.code,
+        });
+      }
+      continue;
+    }
+
+    const codeTokens = extractCodeTokens(line, weekOnLine);
+    if (targetWeek && targetDay && codeTokens.length > 0) {
+      const roomsInOrder = CHANGING_ROOMS.slice(0, Math.min(codeTokens.length, CHANGING_ROOMS.length));
+
+      roomsInOrder.forEach((room, index) => {
+        const code = codeTokens[index];
+        if (!code) {
+          return;
+        }
+
+        rows.push({
+          week_number: targetWeek,
+          day: targetDay,
+          changing_room: room,
+          code,
+        });
+      });
+      continue;
+    }
+
+    if (looksLikeDataLine(line)) {
+      skippedRows += 1;
+    }
+  }
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  return {
+    rows: dedupeRows(rows),
+    skippedRows,
+    detectedFormat: "bildtolkning (OCR)",
+  };
+};
+
+const extractRoomCodePairs = (line: string): Array<{ room: string; code: string }> => {
+  const matches = [...line.matchAll(/(1\s*(?:&|\/|-|och)\s*2|3\s*(?:&|\/|-|och)\s*4|5\s*(?:&|\/|-|och)\s*6)\D{0,8}(\d{3,8})/gi)];
+
+  const pairs: Array<{ room: string; code: string }> = [];
+
+  for (const match of matches) {
+    const room = normalizeRoom(match[1]);
+    const code = (match[2] ?? "").trim();
+
+    if (!room || !code) {
+      continue;
+    }
+
+    pairs.push({ room, code });
+  }
+
+  return pairs;
+};
+
+const extractCodeTokens = (line: string, weekOnLine: number | null): string[] => {
+  const tokens = [...line.matchAll(/\b\d{3,8}\b/g)].map((match) => match[0]);
+
+  if (!weekOnLine) {
+    return tokens;
+  }
+
+  const lineNormalized = normalizeText(line);
+  const lineContainsWeekWord = /(^|\s)(v|v\.|vecka|week)(\s|$)/.test(lineNormalized);
+
+  if (!lineContainsWeekWord) {
+    return tokens;
+  }
+
+  return tokens.filter((token, index) => !(index === 0 && Number.parseInt(token, 10) === weekOnLine));
+};
+
+const looksLikeDataLine = (line: string): boolean => {
+  const normalized = normalizeText(line);
+
+  return (
+    /\d{1,2}/.test(normalized) ||
+    normalized.includes("omkl") ||
+    normalized.includes("kod") ||
+    normalized.includes("1&2") ||
+    normalized.includes("3&4") ||
+    normalized.includes("5&6") ||
+    Boolean(normalizeDay(line))
+  );
 };
 
 const parseLongFormat = (table: string[][]): ParseResult | null => {

@@ -4,7 +4,8 @@ import { useNavigate } from "react-router-dom";
 import AppLayout from "@/shared/layout/AppLayout";
 import { useAuth } from "@/features/auth/useAuth";
 
-const LOGIN_TIMEOUT_MS = 10000;
+const SLOW_LOGIN_WARNING_MS = 10_000;
+const HARD_TIMEOUT_MS = 45_000;
 
 const AdminLoginPage = () => {
   const [email, setEmail] = useState("");
@@ -36,26 +37,38 @@ const AdminLoginPage = () => {
     setError("");
     setIsSubmitting(true);
 
-    const timeoutPromise = new Promise<{ error: Error }>((resolve) => {
-      setTimeout(() => {
-        resolve({ error: new Error("timeout") });
-      }, LOGIN_TIMEOUT_MS);
-    });
+    let hardTimeoutReached = false;
+
+    const slowTimer = window.setTimeout(() => {
+      setError("Inloggningen tar längre tid än vanligt. Vänta en stund till.");
+    }, SLOW_LOGIN_WARNING_MS);
+
+    const hardTimer = window.setTimeout(() => {
+      hardTimeoutReached = true;
+      setError("Kunde inte nå inloggningstjänsten. Kontrollera Vercel-miljövariabler och nätverk.");
+      setIsSubmitting(false);
+    }, HARD_TIMEOUT_MS);
 
     try {
-      const { error: signInError } = await Promise.race([signIn(email, password), timeoutPromise]);
+      const { error: signInError } = await signIn(email, password);
+
+      if (hardTimeoutReached) {
+        return;
+      }
 
       if (signInError) {
-        if (signInError.message === "timeout") {
-          setError("Inloggningen tog för lång tid. Kontrollera nätverket och försök igen.");
-        } else {
-          setError("Fel e-post eller lösenord.");
-        }
+        setError(getSignInErrorMessage(signInError.message));
         setIsSubmitting(false);
       }
+      // On success, AuthProvider updates state and useEffect above handles navigation.
     } catch {
-      setError("Kunde inte logga in just nu. Försök igen.");
-      setIsSubmitting(false);
+      if (!hardTimeoutReached) {
+        setError("Kunde inte logga in just nu. Försök igen.");
+        setIsSubmitting(false);
+      }
+    } finally {
+      window.clearTimeout(slowTimer);
+      window.clearTimeout(hardTimer);
     }
   };
 
@@ -111,6 +124,24 @@ const AdminLoginPage = () => {
       </div>
     </AppLayout>
   );
+};
+
+const getSignInErrorMessage = (message: string): string => {
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes("invalid login credentials")) {
+    return "Fel e-post eller lösenord.";
+  }
+
+  if (normalized.includes("email not confirmed")) {
+    return "E-postadressen är inte bekräftad.";
+  }
+
+  if (normalized.includes("too many requests")) {
+    return "För många försök. Vänta en stund och försök igen.";
+  }
+
+  return "Inloggningen misslyckades. Kontrollera uppgifterna och försök igen.";
 };
 
 export default AdminLoginPage;

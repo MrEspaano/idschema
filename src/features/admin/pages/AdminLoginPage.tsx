@@ -4,9 +4,6 @@ import { useNavigate } from "react-router-dom";
 import AppLayout from "@/shared/layout/AppLayout";
 import { useAuth } from "@/features/auth/useAuth";
 
-const SLOW_LOGIN_WARNING_MS = 10_000;
-const HARD_TIMEOUT_MS = 45_000;
-
 const AdminLoginPage = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -26,49 +23,27 @@ const AdminLoginPage = () => {
       return;
     }
 
-    if (isSubmitting && user && !isAdmin) {
+    if (user && !isAdmin) {
       setError("Kontot är inloggat men saknar adminbehörighet.");
-      setIsSubmitting(false);
     }
-  }, [authLoading, isAdmin, isSubmitting, navigate, user]);
+  }, [authLoading, isAdmin, navigate, user]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
     setIsSubmitting(true);
 
-    let hardTimeoutReached = false;
-
-    const slowTimer = window.setTimeout(() => {
-      setError("Inloggningen tar längre tid än vanligt. Vänta en stund till.");
-    }, SLOW_LOGIN_WARNING_MS);
-
-    const hardTimer = window.setTimeout(() => {
-      hardTimeoutReached = true;
-      setError("Kunde inte nå inloggningstjänsten. Kontrollera Vercel-miljövariabler och nätverk.");
-      setIsSubmitting(false);
-    }, HARD_TIMEOUT_MS);
-
     try {
       const { error: signInError } = await signIn(email, password);
 
-      if (hardTimeoutReached) {
-        return;
-      }
-
       if (signInError) {
         setError(getSignInErrorMessage(signInError.message));
-        setIsSubmitting(false);
       }
       // On success, AuthProvider updates state and useEffect above handles navigation.
     } catch {
-      if (!hardTimeoutReached) {
-        setError("Kunde inte logga in just nu. Försök igen.");
-        setIsSubmitting(false);
-      }
+      setError("Kunde inte logga in just nu. Försök igen.");
     } finally {
-      window.clearTimeout(slowTimer);
-      window.clearTimeout(hardTimer);
+      setIsSubmitting(false);
     }
   };
 
@@ -139,6 +114,16 @@ const getSignInErrorMessage = (message: string): string => {
 
   if (normalized.includes("too many requests")) {
     return "För många försök. Vänta en stund och försök igen.";
+  }
+
+  if (
+    normalized.includes("auth_service_unavailable") ||
+    normalized.includes("failed to fetch") ||
+    normalized.includes("network") ||
+    normalized.includes("timeout") ||
+    normalized.includes("auth fallback failed")
+  ) {
+    return "Kunde inte nå inloggningstjänsten just nu. Kontrollera nätverket och försök igen.";
   }
 
   return "Inloggningen misslyckades. Kontrollera uppgifterna och försök igen.";

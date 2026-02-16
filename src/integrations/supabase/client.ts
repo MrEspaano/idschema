@@ -1,8 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "./types";
 
-const FALLBACK_SUPABASE_URL = "https://invalid.supabase.co";
-const FALLBACK_SUPABASE_KEY = "invalid-key";
+const DEFAULT_SUPABASE_URL = "https://hkysxdvndmbfckhjhshf.supabase.co";
+const DEFAULT_SUPABASE_PUBLISHABLE_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreXN4ZHZuZG1iZmNraGpoc2hmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4MTQwNzksImV4cCI6MjA4NjM5MDA3OX0.gRbOqngPrXmnErtxDY1Jqgl1DPwLJ4DA1CBo7ORmJus";
 const REQUEST_TIMEOUT_MS = 25_000;
 
 const sanitizeEnvValue = (value: unknown): string => {
@@ -35,19 +36,24 @@ const normalizeSupabaseUrl = (value: unknown): string => {
   return "";
 };
 
-const SUPABASE_URL =
+const resolvedUrl =
   normalizeSupabaseUrl(import.meta.env.VITE_SUPABASE_URL) ||
   normalizeSupabaseUrl(import.meta.env.VITE_SUPABASE_PROJECT_ID);
 
-const SUPABASE_PUBLISHABLE_KEY =
+const resolvedKey =
   sanitizeEnvValue(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) ||
   sanitizeEnvValue(import.meta.env.VITE_SUPABASE_ANON_KEY);
 
-if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
-  console.error(
-    "Supabase environment variables are missing/invalid. Check VITE_SUPABASE_URL (or VITE_SUPABASE_PROJECT_ID) and VITE_SUPABASE_PUBLISHABLE_KEY in Vercel.",
+if (!resolvedUrl || !resolvedKey) {
+  console.warn(
+    "Supabase env saknas eller är felaktig. Fallback-värden används.",
   );
 }
+
+export const SUPABASE_CONFIG = {
+  url: resolvedUrl || DEFAULT_SUPABASE_URL,
+  publishableKey: resolvedKey || DEFAULT_SUPABASE_PUBLISHABLE_KEY,
+} as const;
 
 const fetchWithTimeout: typeof fetch = async (input, init = {}) => {
   const controller = new AbortController();
@@ -72,8 +78,8 @@ const fetchWithTimeout: typeof fetch = async (input, init = {}) => {
 };
 
 export const supabase = createClient<Database>(
-  SUPABASE_URL || FALLBACK_SUPABASE_URL,
-  SUPABASE_PUBLISHABLE_KEY || FALLBACK_SUPABASE_KEY,
+  SUPABASE_CONFIG.url,
+  SUPABASE_CONFIG.publishableKey,
   {
     auth: {
       storage: localStorage,

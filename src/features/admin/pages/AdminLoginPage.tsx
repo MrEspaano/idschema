@@ -121,7 +121,8 @@ const getSignInErrorMessage = (message: string): string => {
     normalized.includes("failed to fetch") ||
     normalized.includes("network") ||
     normalized.includes("timeout") ||
-    normalized.includes("auth fallback failed")
+    normalized.includes("auth fallback failed") ||
+    normalized.includes("auth_proxy")
   ) {
     return "Kunde inte nå inloggningstjänsten just nu. Kontrollera nätverket och försök igen.";
   }

@@ -7,11 +7,18 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
+interface SessionTokens {
+  accessToken: string;
+  refreshToken: string;
+}
+
 const DEFAULT_ADMIN_EMAILS = ["erik.espemyr@falkoping.se"];
 const PRIMARY_SIGN_IN_TIMEOUT_MS = 12_000;
-const FALLBACK_SIGN_IN_TIMEOUT_MS = 12_000;
+const PROXY_SIGN_IN_TIMEOUT_MS = 12_000;
+const DIRECT_FALLBACK_TIMEOUT_MS = 12_000;
 const ADMIN_CHECK_TIMEOUT_MS = 8_000;
 const NETWORK_SIGN_IN_ERROR_CODE = "AUTH_SERVICE_UNAVAILABLE";
+const PROXY_UNAVAILABLE_ERROR_CODE = "AUTH_PROXY_UNAVAILABLE";
 
 const sanitizeEnvValue = (value: unknown): string => {
   if (typeof value !== "string") {
@@ -96,11 +103,58 @@ const getAuthPayloadMessage = (payload: unknown): string => {
   return "";
 };
 
+const getSessionTokens = (payload: unknown): SessionTokens | null => {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const data = payload as Record<string, unknown>;
+  const accessToken = typeof data.access_token === "string" ? data.access_token : "";
+  const refreshToken = typeof data.refresh_token === "string" ? data.refresh_token : "";
+
+  if (!accessToken || !refreshToken) {
+    return null;
+  }
+
+  return { accessToken, refreshToken };
+};
+
+const isInfrastructureAuthError = (error: Error): boolean => {
+  const normalized = error.message.toLowerCase();
+
+  return (
+    normalized.includes("auth_service_unavailable") ||
+    normalized.includes("auth_proxy_unavailable") ||
+    normalized.includes("auth_proxy_timeout") ||
+    normalized.includes("auth_proxy_network_error") ||
+    normalized.includes("failed to fetch") ||
+    normalized.includes("network") ||
+    normalized.includes("timeout")
+  );
+};
+
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  const applySessionTokens = useCallback(async (tokens: SessionTokens): Promise<Error | null> => {
+    const { error: setSessionError } = await withTimeout(
+      supabase.auth.setSession({
+        access_token: tokens.accessToken,
+        refresh_token: tokens.refreshToken,
+      }),
+      PRIMARY_SIGN_IN_TIMEOUT_MS,
+      "AUTH_TIMEOUT_SET_SESSION",
+    );
+
+    if (setSessionError) {
+      return setSessionError as Error;
+    }
+
+    return null;
+  }, []);
 
   const checkAdmin = useCallback(async (currentUser: User): Promise<boolean> => {
     if (isWhitelistedAdmin(currentUser)) {
@@ -147,65 +201,102 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   }, []);
 
-  const signInWithRestFallback = useCallback(async (email: string, password: string) => {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), FALLBACK_SIGN_IN_TIMEOUT_MS);
+  const signInWithProxyFallback = useCallback(
+    async (email: string, password: string): Promise<Error | null> => {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), PROXY_SIGN_IN_TIMEOUT_MS);
 
-    try {
-      const response = await fetch(`${SUPABASE_CONFIG.url}/auth/v1/token?grant_type=password`, {
-        method: "POST",
-        headers: {
-          apikey: SUPABASE_CONFIG.publishableKey,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, password }),
-        signal: controller.signal,
-      });
-
-      let payload: unknown = null;
       try {
-        payload = await response.json();
-      } catch {
-        payload = null;
+        const response = await fetch("/api/auth/password-login", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ email, password }),
+          signal: controller.signal,
+        });
+
+        let payload: unknown = null;
+        try {
+          payload = await response.json();
+        } catch {
+          payload = null;
+        }
+
+        if (response.status === 404 || response.status === 405) {
+          return new Error(PROXY_UNAVAILABLE_ERROR_CODE);
+        }
+
+        if (!response.ok) {
+          const message = getAuthPayloadMessage(payload);
+          return new Error(message || `Auth proxy failed (${response.status})`);
+        }
+
+        const tokens = getSessionTokens(payload);
+        if (!tokens) {
+          return new Error("Auth proxy response saknar giltiga tokens.");
+        }
+
+        return await applySessionTokens(tokens);
+      } catch (error) {
+        if (isNetworkLikeError(error)) {
+          return new Error(NETWORK_SIGN_IN_ERROR_CODE);
+        }
+
+        return toError(error, "Inloggningen misslyckades.");
+      } finally {
+        window.clearTimeout(timeout);
       }
+    },
+    [applySessionTokens],
+  );
 
-      if (!response.ok) {
-        const fallbackMessage = getAuthPayloadMessage(payload);
-        return new Error(fallbackMessage || `Auth fallback failed (${response.status})`);
+  const signInWithDirectFallback = useCallback(
+    async (email: string, password: string): Promise<Error | null> => {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), DIRECT_FALLBACK_TIMEOUT_MS);
+
+      try {
+        const response = await fetch(`${SUPABASE_CONFIG.url}/auth/v1/token?grant_type=password`, {
+          method: "POST",
+          headers: {
+            apikey: SUPABASE_CONFIG.publishableKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ email, password }),
+          signal: controller.signal,
+        });
+
+        let payload: unknown = null;
+        try {
+          payload = await response.json();
+        } catch {
+          payload = null;
+        }
+
+        if (!response.ok) {
+          const fallbackMessage = getAuthPayloadMessage(payload);
+          return new Error(fallbackMessage || `Auth fallback failed (${response.status})`);
+        }
+
+        const tokens = getSessionTokens(payload);
+        if (!tokens) {
+          return new Error("Auth fallback response saknar giltiga tokens.");
+        }
+
+        return await applySessionTokens(tokens);
+      } catch (error) {
+        if (isNetworkLikeError(error)) {
+          return new Error(NETWORK_SIGN_IN_ERROR_CODE);
+        }
+
+        return toError(error, "Inloggningen misslyckades.");
+      } finally {
+        window.clearTimeout(timeout);
       }
-
-      const payloadRecord = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : null;
-      const accessToken = typeof payloadRecord?.access_token === "string" ? payloadRecord.access_token : "";
-      const refreshToken = typeof payloadRecord?.refresh_token === "string" ? payloadRecord.refresh_token : "";
-
-      if (!accessToken || !refreshToken) {
-        return new Error("Auth fallback response saknar giltiga tokens.");
-      }
-
-      const { error: setSessionError } = await withTimeout(
-        supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        }),
-        PRIMARY_SIGN_IN_TIMEOUT_MS,
-        "AUTH_TIMEOUT_SET_SESSION",
-      );
-
-      if (setSessionError) {
-        return setSessionError as Error;
-      }
-
-      return null;
-    } catch (error) {
-      if (isNetworkLikeError(error)) {
-        return new Error(NETWORK_SIGN_IN_ERROR_CODE);
-      }
-
-      return toError(error, "Inloggningen misslyckades.");
-    } finally {
-      window.clearTimeout(timeout);
-    }
-  }, []);
+    },
+    [applySessionTokens],
+  );
 
   useEffect(() => {
     const {
@@ -293,13 +384,21 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       }
     }
 
-    const fallbackError = await signInWithRestFallback(normalizedEmail, normalizedPassword);
-
-    if (!fallbackError) {
+    const proxyError = await signInWithProxyFallback(normalizedEmail, normalizedPassword);
+    if (!proxyError) {
       return { error: null };
     }
 
-    return { error: fallbackError };
+    if (!isInfrastructureAuthError(proxyError)) {
+      return { error: proxyError };
+    }
+
+    const directFallbackError = await signInWithDirectFallback(normalizedEmail, normalizedPassword);
+    if (!directFallbackError) {
+      return { error: null };
+    }
+
+    return { error: directFallbackError };
   };
 
   const signOut = async () => {

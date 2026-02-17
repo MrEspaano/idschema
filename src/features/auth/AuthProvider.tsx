@@ -1,7 +1,7 @@
 import { ReactNode, useCallback, useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { SUPABASE_CONFIG, supabase } from "@/integrations/supabase/client";
-import { AuthContext } from "./AuthContext";
+import { AuthContext, type AdminAccessRole } from "./AuthContext";
 
 interface AuthProviderProps {
   children: ReactNode;
@@ -10,6 +10,11 @@ interface AuthProviderProps {
 interface SessionTokens {
   accessToken: string;
   refreshToken: string;
+}
+
+interface AdminAccess {
+  isAdmin: boolean;
+  role: AdminAccessRole;
 }
 
 const DEFAULT_ADMIN_EMAILS = ["erik.espemyr@falkoping.se"];
@@ -43,6 +48,20 @@ const ADMIN_EMAIL_ALLOWLIST = getAdminEmailAllowlist();
 const isWhitelistedAdmin = (user: User): boolean => {
   const email = user.email?.toLowerCase();
   return Boolean(email && ADMIN_EMAIL_ALLOWLIST.has(email));
+};
+
+const normalizeAdminRole = (value: unknown): AdminAccessRole => {
+  const role = typeof value === "string" ? value.trim().toLowerCase() : "";
+
+  if (role === "owner" || role === "editor" || role === "viewer") {
+    return role;
+  }
+
+  if (role === "admin") {
+    return "admin";
+  }
+
+  return "none";
 };
 
 const toError = (error: unknown, fallbackMessage: string): Error => {
@@ -133,10 +152,19 @@ const isInfrastructureAuthError = (error: Error): boolean => {
   );
 };
 
+const resolveAdminFromRole = (role: AdminAccessRole): AdminAccess => {
+  if (role === "owner" || role === "editor" || role === "admin") {
+    return { isAdmin: true, role };
+  }
+
+  return { isAdmin: false, role };
+};
+
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminRole, setAdminRole] = useState<AdminAccessRole>("none");
   const [loading, setLoading] = useState(true);
 
   const applySessionTokens = useCallback(async (tokens: SessionTokens): Promise<Error | null> => {
@@ -156,9 +184,36 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     return null;
   }, []);
 
-  const checkAdmin = useCallback(async (currentUser: User): Promise<boolean> => {
+  const checkAdminAccess = useCallback(async (currentUser: User): Promise<AdminAccess> => {
     if (isWhitelistedAdmin(currentUser)) {
-      return true;
+      return { isAdmin: true, role: "owner" };
+    }
+
+    const currentEmail = currentUser.email?.toLowerCase() ?? "";
+
+    if (currentEmail) {
+      try {
+        const { data, error } = await withTimeout(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (supabase as any)
+            .from("admin_users")
+            .select("role,active")
+            .eq("email", currentEmail)
+            .eq("active", true)
+            .maybeSingle(),
+          ADMIN_CHECK_TIMEOUT_MS,
+          "AUTH_TIMEOUT_ADMIN_USERS",
+        );
+
+        if (!error && data) {
+          const role = normalizeAdminRole(data.role);
+          if (role !== "none") {
+            return resolveAdminFromRole(role);
+          }
+        }
+      } catch (error) {
+        console.warn("admin_users lookup timed out or failed:", toError(error, "unknown").message);
+      }
     }
 
     try {
@@ -172,7 +227,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       );
 
       if (!hasRoleError && hasRoleData === true) {
-        return true;
+        return { isAdmin: true, role: "admin" };
       }
     } catch (error) {
       console.warn("Admin role RPC timed out or failed:", toError(error, "unknown").message);
@@ -194,11 +249,14 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         console.error("Failed to verify admin role:", roleError.message);
       }
 
-      return Boolean(roleData);
+      if (roleData) {
+        return { isAdmin: true, role: "admin" };
+      }
     } catch (error) {
       console.warn("Admin role lookup timed out or failed:", toError(error, "unknown").message);
-      return false;
     }
+
+    return { isAdmin: false, role: "none" };
   }, []);
 
   const signInWithProxyFallback = useCallback(
@@ -306,16 +364,19 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       setUser(currentSession?.user ?? null);
 
       if (currentSession?.user) {
-        let admin = false;
+        let access: AdminAccess = { isAdmin: false, role: "none" };
+
         try {
-          admin = await checkAdmin(currentSession.user);
+          access = await checkAdminAccess(currentSession.user);
         } catch (error) {
           console.error("Failed to resolve admin permissions:", toError(error, "unknown").message);
         }
 
-        setIsAdmin(admin);
+        setIsAdmin(access.isAdmin);
+        setAdminRole(access.role);
       } else {
         setIsAdmin(false);
+        setAdminRole("none");
       }
 
       setLoading(false);
@@ -331,22 +392,25 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         setUser(currentSession?.user ?? null);
 
         if (currentSession?.user) {
-          let admin = false;
+          let access: AdminAccess = { isAdmin: false, role: "none" };
           try {
-            admin = await checkAdmin(currentSession.user);
+            access = await checkAdminAccess(currentSession.user);
           } catch (error) {
             console.error("Failed to resolve admin permissions:", toError(error, "unknown").message);
           }
 
-          setIsAdmin(admin);
+          setIsAdmin(access.isAdmin);
+          setAdminRole(access.role);
         } else {
           setIsAdmin(false);
+          setAdminRole("none");
         }
       } catch (error) {
         console.error("Failed to initialize auth session:", toError(error, "unknown").message);
         setSession(null);
         setUser(null);
         setIsAdmin(false);
+        setAdminRole("none");
       } finally {
         setLoading(false);
       }
@@ -355,7 +419,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     initializeSession();
 
     return () => subscription.unsubscribe();
-  }, [checkAdmin]);
+  }, [checkAdminAccess]);
 
   const signIn = async (email: string, password: string) => {
     const normalizedEmail = email.trim().toLowerCase();
@@ -404,10 +468,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const signOut = async () => {
     await supabase.auth.signOut();
     setIsAdmin(false);
+    setAdminRole("none");
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, isAdmin, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, session, isAdmin, adminRole, loading, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   );

@@ -29,11 +29,12 @@ const AppLayout = ({ children }: AppLayoutProps) => {
           </Link>
 
           <Link
-            to={isAdminRoute ? "/admin" : "/admin/login"}
+            to={isAdminRoute ? "/" : "/admin/login"}
             className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            aria-label="Admin"
+            aria-label={isAdminRoute ? "Till elevvy" : "Admin"}
+            title={isAdminRoute ? "Till elevvy" : "Admin"}
           >
-            <Settings className="h-5 w-5" />
+            {isAdminRoute ? <Home className="h-5 w-5" /> : <Settings className="h-5 w-5" />}
           </Link>
         </div>
       </header>

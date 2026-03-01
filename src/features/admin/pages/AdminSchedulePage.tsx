@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/features/auth/useAuth";
 import { apiData } from "@/shared/lib/api";
 import AppLayout from "@/shared/layout/AppLayout";
-import { CHANGING_ROOMS, CLASSES, HALLS, WEEK_DAYS, type ClassName, type WeekDay } from "@/shared/constants/school";
+import { CHANGING_ROOMS, CLASSES, HALLS, WEEK_DAYS, type WeekDay } from "@/shared/constants/school";
 import { getCurrentWeek } from "@/shared/lib/date";
 
 interface ClassDayHallRow {
@@ -55,6 +55,12 @@ interface LessonRow {
   bring_laptop: boolean;
 }
 
+interface SchoolSettingsResponse {
+  settings?: {
+    classes?: string[];
+  };
+}
+
 const OTHER_HALL_VALUE = "__other_hall__";
 
 const createEmptyLessonRow = (day: string, hall = HALLS[0]): LessonRow => ({
@@ -75,7 +81,8 @@ const AdminSchedulePage = () => {
   const { isAdmin, loading: authLoading } = useAuth();
   const navigate = useNavigate();
 
-  const [selectedClass, setSelectedClass] = useState<ClassName>(CLASSES[0]);
+  const [classOptions, setClassOptions] = useState<string[]>([...CLASSES]);
+  const [selectedClass, setSelectedClass] = useState<string>(CLASSES[0]);
   const [weekNumber, setWeekNumber] = useState(getCurrentWeek());
   const [classDayHalls, setClassDayHalls] = useState<ClassDayHallRow[]>([]);
   const [rows, setRows] = useState<LessonRow[]>([]);
@@ -89,6 +96,31 @@ const AdminSchedulePage = () => {
       navigate("/admin/login");
     }
   }, [authLoading, isAdmin, navigate]);
+
+  useEffect(() => {
+    const loadClassOptions = async () => {
+      try {
+        const data = await apiData<SchoolSettingsResponse | null>("school_settings", "get");
+        const classesFromSettings =
+          data?.settings?.classes?.filter((item) => typeof item === "string" && item.trim()) ?? [];
+
+        if (classesFromSettings.length > 0) {
+          setClassOptions(classesFromSettings);
+          setSelectedClass((current) =>
+            current && classesFromSettings.includes(current) ? current : classesFromSettings[0],
+          );
+          return;
+        }
+      } catch {
+        // fallback to defaults
+      }
+
+      setClassOptions([...CLASSES]);
+      setSelectedClass((current) => current || CLASSES[0]);
+    };
+
+    loadClassOptions();
+  }, []);
 
   useEffect(() => {
     const loadClassStructure = async () => {
@@ -301,7 +333,7 @@ const AdminSchedulePage = () => {
         </header>
 
         <section className="flex flex-wrap gap-2">
-          {CLASSES.map((className) => (
+          {classOptions.map((className) => (
             <button
               key={className}
               onClick={() => setSelectedClass(className)}

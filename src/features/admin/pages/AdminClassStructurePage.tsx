@@ -9,7 +9,6 @@ import {
   CLASSES,
   HALLS,
   WEEK_DAYS,
-  type ClassName,
   type Hall,
   type WeekDay,
 } from "@/shared/constants/school";
@@ -20,11 +19,18 @@ interface DayHallRow {
   hall: Hall;
 }
 
+interface SchoolSettingsResponse {
+  settings?: {
+    classes?: string[];
+  };
+}
+
 const AdminClassStructurePage = () => {
   const { isAdmin, loading: authLoading } = useAuth();
   const navigate = useNavigate();
 
-  const [selectedClass, setSelectedClass] = useState<ClassName>(CLASSES[0]);
+  const [classOptions, setClassOptions] = useState<string[]>([...CLASSES]);
+  const [selectedClass, setSelectedClass] = useState<string>(CLASSES[0]);
   const [rows, setRows] = useState<DayHallRow[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -33,6 +39,31 @@ const AdminClassStructurePage = () => {
       navigate("/admin/login");
     }
   }, [authLoading, isAdmin, navigate]);
+
+  useEffect(() => {
+    const loadClassOptions = async () => {
+      try {
+        const data = await apiData<SchoolSettingsResponse | null>("school_settings", "get");
+        const classesFromSettings =
+          data?.settings?.classes?.filter((item) => typeof item === "string" && item.trim()) ?? [];
+
+        if (classesFromSettings.length > 0) {
+          setClassOptions(classesFromSettings);
+          setSelectedClass((current) =>
+            current && classesFromSettings.includes(current) ? current : classesFromSettings[0],
+          );
+          return;
+        }
+      } catch {
+        // fallback to defaults
+      }
+
+      setClassOptions([...CLASSES]);
+      setSelectedClass((current) => current || CLASSES[0]);
+    };
+
+    loadClassOptions();
+  }, []);
 
   const loadStructure = useCallback(async () => {
     const data = await apiData<Array<{ id: string; day: string; hall: string }>>(
@@ -123,7 +154,7 @@ const AdminClassStructurePage = () => {
         </header>
 
         <section className="flex flex-wrap gap-2">
-          {CLASSES.map((className) => (
+          {classOptions.map((className) => (
             <button
               key={className}
               onClick={() => setSelectedClass(className)}

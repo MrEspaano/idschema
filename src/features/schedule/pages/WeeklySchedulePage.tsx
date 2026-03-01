@@ -6,15 +6,16 @@ import {
   ChevronRight,
   DoorOpen,
   KeyRound,
+  Laptop,
   MapPin,
   Shirt,
-  Laptop,
   XCircle,
 } from "lucide-react";
 import AppLayout from "@/shared/layout/AppLayout";
 import { apiData } from "@/shared/lib/api";
 import { getCurrentWeek } from "@/shared/lib/date";
 import { CLASSES, type ClassName, WEEK_DAYS } from "@/shared/constants/school";
+
 interface ClassDayHallRow {
   day: string;
   hall: string;
@@ -68,13 +69,29 @@ const WeeklySchedulePage = () => {
 
       const [halls, schedules, codes] = await Promise.all([
         apiData<Array<ClassDayHallRow>>("class_day_halls", "list", { className: selectedClass }),
-        apiData<Array<WeeklyScheduleRow>>("weekly_schedules", "list", { className: selectedClass, weekNumber: currentWeek }),
+        apiData<Array<WeeklyScheduleRow>>("weekly_schedules", "list", {
+          className: selectedClass,
+          weekNumber: currentWeek,
+        }),
         apiData<Array<ChangingCodeRow>>("changing_room_codes", "list", { weekNumber: currentWeek }),
       ]);
 
-      const merged = halls
-        .map((hallEntry) => mapLesson(hallEntry, schedules, codes))
-        .sort((a, b) => WEEK_DAYS.indexOf(a.day as (typeof WEEK_DAYS)[number]) - WEEK_DAYS.indexOf(b.day as (typeof WEEK_DAYS)[number]));
+      const merged =
+        (halls?.length ?? 0) > 0
+          ? halls
+              .map((hallEntry) => mapLessonFromHall(hallEntry, schedules, codes))
+              .sort(
+                (a, b) =>
+                  WEEK_DAYS.indexOf(a.day as (typeof WEEK_DAYS)[number]) -
+                  WEEK_DAYS.indexOf(b.day as (typeof WEEK_DAYS)[number]),
+              )
+          : (schedules ?? [])
+              .map((schedule) => mapLessonFromSchedule(schedule, codes))
+              .sort(
+                (a, b) =>
+                  WEEK_DAYS.indexOf(a.day as (typeof WEEK_DAYS)[number]) -
+                  WEEK_DAYS.indexOf(b.day as (typeof WEEK_DAYS)[number]),
+              );
 
       setLessons(merged);
       setLoading(false);
@@ -142,7 +159,7 @@ const WeeklySchedulePage = () => {
               <section className="space-y-3">
                 {lessons.map((lesson) => (
                   <article
-                    key={lesson.day}
+                    key={`${lesson.day}-${lesson.activity}`}
                     className={
                       lesson.cancelled
                         ? "space-y-3 rounded-2xl border bg-card p-5 opacity-60"
@@ -216,7 +233,7 @@ const WeeklySchedulePage = () => {
   );
 };
 
-const mapLesson = (
+const mapLessonFromHall = (
   hallEntry: ClassDayHallRow,
   schedules: WeeklyScheduleRow[],
   codes: ChangingCodeRow[],
@@ -244,7 +261,25 @@ const mapLesson = (
   return {
     day: hallEntry.day,
     activity: schedule.activity,
-    hall: hallEntry.hall,
+    hall: schedule.hall || hallEntry.hall,
+    changingRoom: schedule.changing_room || "-",
+    code: matchingCode?.code || "-",
+    cancelled: schedule.cancelled,
+    isTheory: schedule.is_theory,
+    bringChange: schedule.bring_change,
+    bringLaptop: schedule.bring_laptop,
+  };
+};
+
+const mapLessonFromSchedule = (schedule: WeeklyScheduleRow, codes: ChangingCodeRow[]): ScheduleDisplay => {
+  const matchingCode = codes.find(
+    (item) => item.day === schedule.day && item.changing_room === schedule.changing_room,
+  );
+
+  return {
+    day: schedule.day,
+    activity: schedule.activity,
+    hall: schedule.hall || "-",
     changingRoom: schedule.changing_room || "-",
     code: matchingCode?.code || "-",
     cancelled: schedule.cancelled,

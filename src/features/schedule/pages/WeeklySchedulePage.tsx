@@ -7,6 +7,8 @@ import {
   DoorOpen,
   KeyRound,
   MapPin,
+  Shirt,
+  Laptop,
   XCircle,
 } from "lucide-react";
 import AppLayout from "@/shared/layout/AppLayout";
@@ -27,6 +29,8 @@ interface ScheduleDisplay {
   code: string;
   cancelled: boolean;
   isTheory: boolean;
+  bringChange: boolean;
+  bringLaptop: boolean;
 }
 
 const WeeklySchedulePage = () => {
@@ -167,9 +171,23 @@ const WeeklySchedulePage = () => {
                       {lesson.cancelled ? <s>{lesson.activity}</s> : lesson.activity}
                     </p>
 
-                    <p className="text-sm text-muted-foreground">
-                      {lesson.isTheory ? "Ta med dator. Inget ombyte." : "Ombyte och dator med."}
-                    </p>
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {lesson.bringChange && (
+                        <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-1 font-medium text-foreground">
+                          <Shirt className="h-3.5 w-3.5" />
+                          Ombyte
+                        </span>
+                      )}
+                      {lesson.bringLaptop && (
+                        <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-1 font-medium text-foreground">
+                          <Laptop className="h-3.5 w-3.5" />
+                          Dator
+                        </span>
+                      )}
+                      {!lesson.bringChange && !lesson.bringLaptop && (
+                        <span className="text-muted-foreground">Ingen särskild utrustning</span>
+                      )}
+                    </div>
 
                     <div className="grid grid-cols-3 gap-3 pt-1">
                       <InfoBlock icon={MapPin} label="Sal" value={lesson.hall} />
@@ -212,6 +230,8 @@ const mapLesson = (
       code: "-",
       cancelled: false,
       isTheory: false,
+      bringChange: true,
+      bringLaptop: false,
     };
   }
 
@@ -227,6 +247,8 @@ const mapLesson = (
     code: matchingCode?.code || "-",
     cancelled: schedule.cancelled,
     isTheory: schedule.is_theory,
+    bringChange: schedule.bring_change,
+    bringLaptop: schedule.bring_laptop,
   };
 };
 

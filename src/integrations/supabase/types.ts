@@ -137,6 +137,8 @@ export type Database = {
           hall: string
           id: string
           is_theory: boolean
+          bring_change: boolean
+          bring_laptop: boolean
           updated_at: string
           week_number: number
         }
@@ -151,6 +153,8 @@ export type Database = {
           hall?: string
           id?: string
           is_theory?: boolean
+          bring_change?: boolean
+          bring_laptop?: boolean
           updated_at?: string
           week_number: number
         }
@@ -165,6 +169,8 @@ export type Database = {
           hall?: string
           id?: string
           is_theory?: boolean
+          bring_change?: boolean
+          bring_laptop?: boolean
           updated_at?: string
           week_number?: number
         }

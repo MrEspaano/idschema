@@ -362,6 +362,11 @@ const AdminSchedulePage = () => {
           ))}
         </section>
 
+        <section className="rounded-xl border bg-card px-4 py-3">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Redigerar klass</p>
+          <p className="text-base font-semibold text-foreground">{selectedClass}</p>
+        </section>
+
         <section className="flex items-center gap-3">
           <label htmlFor="week-number" className="text-sm font-medium">
             Vecka:

@@ -52,6 +52,35 @@ const buildToken = (payload, secret) => {
   return `${unsigned}.${signature}`;
 };
 
+const readBody = async (req) => {
+  if (req.body && typeof req.body === "object") {
+    return req.body;
+  }
+
+  if (typeof req.body === "string") {
+    try {
+      return JSON.parse(req.body || "{}");
+    } catch {
+      return {};
+    }
+  }
+
+  const chunks = [];
+  for await (const chunk of req) {
+    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+  }
+
+  if (chunks.length === 0) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf-8") || "{}");
+  } catch {
+    return {};
+  }
+};
+
 const json = (res, status, payload) => {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -74,7 +103,7 @@ export default async function handler(req, res) {
     return json(res, 500, { message: "Servern saknar ADMIN_EMAIL/ADMIN_PASSWORD eller AUTH_USERS_JSON." });
   }
 
-  const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+  const body = await readBody(req);
   const email = String(body.email || "").trim().toLowerCase();
   const password = String(body.password || "");
 

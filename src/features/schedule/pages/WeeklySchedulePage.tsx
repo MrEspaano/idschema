@@ -14,7 +14,7 @@ import {
 import AppLayout from "@/shared/layout/AppLayout";
 import { apiData } from "@/shared/lib/api";
 import { getCurrentWeek } from "@/shared/lib/date";
-import { CLASSES, type ClassName, WEEK_DAYS } from "@/shared/constants/school";
+import { CLASSES, WEEK_DAYS } from "@/shared/constants/school";
 
 interface ClassDayHallRow {
   day: string;
@@ -30,6 +30,7 @@ interface WeeklyScheduleRow {
   is_theory: boolean;
   bring_change: boolean;
   bring_laptop: boolean;
+  code: string;
 }
 
 interface ChangingCodeRow {
@@ -50,13 +51,42 @@ interface ScheduleDisplay {
   bringLaptop: boolean;
 }
 
+interface SchoolSettingsResponse {
+  settings?: {
+    classes?: string[];
+  };
+}
+
 const WeeklySchedulePage = () => {
-  const [selectedClass, setSelectedClass] = useState<ClassName | null>(null);
+  const [classOptions, setClassOptions] = useState<string[]>([...CLASSES]);
+  const [selectedClass, setSelectedClass] = useState<string | null>(null);
   const [currentWeek, setCurrentWeek] = useState(getCurrentWeek());
   const [lessons, setLessons] = useState<ScheduleDisplay[]>([]);
   const [loading, setLoading] = useState(false);
 
   const isCurrentWeek = useMemo(() => currentWeek === getCurrentWeek(), [currentWeek]);
+
+  useEffect(() => {
+    const loadClassOptions = async () => {
+      try {
+        const data = await apiData<SchoolSettingsResponse | null>("school_settings", "get");
+        const classesFromSettings = data?.settings?.classes?.filter((item) => typeof item === "string" && item.trim()) ?? [];
+
+        if (classesFromSettings.length > 0) {
+          setClassOptions(classesFromSettings);
+          setSelectedClass((current) => (current && classesFromSettings.includes(current) ? current : classesFromSettings[0]));
+          return;
+        }
+      } catch {
+        // fallback to defaults
+      }
+
+      setClassOptions([...CLASSES]);
+      setSelectedClass((current) => current || CLASSES[0]);
+    };
+
+    loadClassOptions();
+  }, []);
 
   useEffect(() => {
     if (!selectedClass) {
@@ -109,7 +139,7 @@ const WeeklySchedulePage = () => {
         </header>
 
         <section className="flex flex-wrap gap-2">
-          {CLASSES.map((className) => (
+          {classOptions.map((className) => (
             <button
               key={className}
               onClick={() => setSelectedClass(className)}

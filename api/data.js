@@ -63,8 +63,18 @@ const actionNeedsAdmin = (resource, action) => {
 };
 
 export default async function handler(req, res) {
+  if (req.method === "GET") {
+    try {
+      const db = await query("select now() as now");
+      return json(res, 200, { ok: true, data: { now: db.rows[0]?.now || null } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Okänt serverfel";
+      return json(res, 500, { ok: false, message });
+    }
+  }
+
   if (req.method !== "POST") {
-    res.setHeader("Allow", "POST");
+    res.setHeader("Allow", "GET, POST");
     return json(res, 405, { message: "Method not allowed" });
   }
 

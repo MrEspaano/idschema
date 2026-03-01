@@ -3,7 +3,6 @@ import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, RefreshCw } from "lucide
 import { Link, useNavigate } from "react-router-dom";
 import AppLayout from "@/shared/layout/AppLayout";
 import { useAuth } from "@/features/auth/useAuth";
-import { apiData } from "@/shared/lib/api";
 
 interface HealthItem {
   id: string;
@@ -66,43 +65,28 @@ const AdminSystemStatusPage = () => {
     }
 
     try {
-      const response = await withTimeout("/api/data", 8000, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ resource: "health", action: "ping", payload: {} }),
-      });
+      const response = await withTimeout("/api/data", 8000, { method: "GET", credentials: "include" });
+      const payload = (await response.json().catch(() => ({}))) as { message?: string; data?: { now?: string } };
 
       next.push({
         id: "api",
         name: "API-router",
         status: response.ok ? "ok" : "error",
-        details: `HTTP ${response.status}`,
+        details: response.ok ? `HTTP ${response.status}` : `HTTP ${response.status} ${payload.message || ""}`.trim(),
       });
-    } catch (error) {
-      next.push({
-        id: "api",
-        name: "API-router",
-        status: "error",
-        details: error instanceof Error ? error.message : "Okänt fel",
-      });
-    }
 
-    try {
-      const data = await apiData<{ now: string | null; sessionRole: string }>("health", "ping");
       next.push({
         id: "neon",
         name: "Neon databas",
-        status: data?.now ? "ok" : "error",
-        details: data?.now ? `Svarar (${data.now})` : "Ingen tid returnerad",
+        status: response.ok ? "ok" : "error",
+        details: response.ok
+          ? `Svarar (${payload.data?.now || "okänd tid"})`
+          : payload.message || `API-fel (${response.status})`,
       });
     } catch (error) {
-      next.push({
-        id: "neon",
-        name: "Neon databas",
-        status: "error",
-        details: error instanceof Error ? error.message : "Okänt fel",
-      });
+      const message = error instanceof Error ? error.message : "Okänt fel";
+      next.push({ id: "api", name: "API-router", status: "error", details: message });
+      next.push({ id: "neon", name: "Neon databas", status: "error", details: message });
     }
 
     setItems(next);

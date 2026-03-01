@@ -1,129 +1,116 @@
-const DEFAULT_SUPABASE_URL = "https://hkysxdvndmbfckhjhshf.supabase.co";
-const DEFAULT_SUPABASE_PUBLISHABLE_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreXN4ZHZuZG1iZmNraGpoc2hmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4MTQwNzksImV4cCI6MjA4NjM5MDA3OX0.gRbOqngPrXmnErtxDY1Jqgl1DPwLJ4DA1CBo7ORmJus";
-const REQUEST_TIMEOUT_MS = 12_000;
+import crypto from "node:crypto";
 
-const sanitizeEnvValue = (value) => {
-  if (typeof value !== "string") {
-    return "";
-  }
+const COOKIE_NAME = "idschema_session";
+const SESSION_DAYS = 7;
 
-  const trimmed = value.trim();
-  const unquoted = trimmed.replace(/^['"`](.*)['"`]$/, "$1");
-  return unquoted.trim();
+const toBase64Url = (input) => {
+  const raw = Buffer.isBuffer(input) ? input.toString("base64") : Buffer.from(input).toString("base64");
+  return raw.replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 };
 
-const isLikelyProjectRef = (value) => /^[a-z0-9]{20}$/i.test(value);
-
-const normalizeSupabaseUrl = (value) => {
-  const normalized = sanitizeEnvValue(value);
-
-  if (!normalized) {
-    return "";
-  }
-
-  if (/^https?:\/\//i.test(normalized)) {
-    return normalized.replace(/\/+$/, "");
-  }
-
-  if (isLikelyProjectRef(normalized)) {
-    return `https://${normalized}.supabase.co`;
-  }
-
-  return "";
+const hmacSha256 = (value, secret) => {
+  return crypto.createHmac("sha256", secret).update(value).digest("base64url");
 };
 
-const getSupabaseConfig = () => {
-  const resolvedUrl =
-    normalizeSupabaseUrl(process.env.SUPABASE_URL) ||
-    normalizeSupabaseUrl(process.env.VITE_SUPABASE_URL) ||
-    normalizeSupabaseUrl(process.env.SUPABASE_PROJECT_ID) ||
-    normalizeSupabaseUrl(process.env.VITE_SUPABASE_PROJECT_ID);
-
-  const resolvedKey =
-    sanitizeEnvValue(process.env.SUPABASE_ANON_KEY) ||
-    sanitizeEnvValue(process.env.VITE_SUPABASE_ANON_KEY) ||
-    sanitizeEnvValue(process.env.SUPABASE_PUBLISHABLE_KEY) ||
-    sanitizeEnvValue(process.env.VITE_SUPABASE_PUBLISHABLE_KEY);
-
-  return {
-    url: resolvedUrl || DEFAULT_SUPABASE_URL,
-    publishableKey: resolvedKey || DEFAULT_SUPABASE_PUBLISHABLE_KEY,
-  };
-};
-
-const parseJsonBody = (rawBody) => {
-  if (!rawBody) {
-    return null;
-  }
-
-  if (typeof rawBody === "object") {
-    return rawBody;
-  }
-
-  if (typeof rawBody !== "string") {
-    return null;
-  }
-
-  try {
-    return JSON.parse(rawBody);
-  } catch {
-    return null;
-  }
-};
-
-module.exports = async function handler(req, res) {
-  res.setHeader("Cache-Control", "no-store");
-
-  if (req.method !== "POST") {
-    res.status(405).json({ message: "Method not allowed" });
-    return;
-  }
-
-  const body = parseJsonBody(req.body);
-  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
-  const password = typeof body?.password === "string" ? body.password : "";
-
-  if (!email || !password) {
-    res.status(400).json({ message: "Missing email or password" });
-    return;
-  }
-
-  const { url, publishableKey } = getSupabaseConfig();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(`${url}/auth/v1/token?grant_type=password`, {
-      method: "POST",
-      headers: {
-        apikey: publishableKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email, password }),
-      signal: controller.signal,
-    });
-
-    const text = await response.text();
-    let payload = {};
-
-    if (text) {
-      try {
-        payload = JSON.parse(text);
-      } catch {
-        payload = { message: text };
+const parseUsers = () => {
+  const raw = process.env.AUTH_USERS_JSON;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((item) => item && typeof item === "object")
+          .map((item) => ({
+            email: String(item.email || "").trim().toLowerCase(),
+            password: String(item.password || ""),
+            role: String(item.role || "owner"),
+          }))
+          .filter((item) => item.email && item.password);
       }
+    } catch {
+      // fallback below
     }
-
-    res.status(response.status).json(payload);
-  } catch (error) {
-    if (error && typeof error === "object" && error.name === "AbortError") {
-      res.status(504).json({ message: "AUTH_PROXY_TIMEOUT" });
-      return;
-    }
-
-    res.status(503).json({ message: "AUTH_PROXY_NETWORK_ERROR" });
-  } finally {
-    clearTimeout(timeout);
   }
+
+  const email = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+  const password = String(process.env.ADMIN_PASSWORD || "");
+  const role = String(process.env.ADMIN_ROLE || "owner");
+
+  if (email && password) {
+    return [{ email, password, role }];
+  }
+
+  return [];
 };
+
+const buildToken = (payload, secret) => {
+  const header = { alg: "HS256", typ: "JWT" };
+  const encodedHeader = toBase64Url(JSON.stringify(header));
+  const encodedPayload = toBase64Url(JSON.stringify(payload));
+  const unsigned = `${encodedHeader}.${encodedPayload}`;
+  const signature = hmacSha256(unsigned, secret);
+  return `${unsigned}.${signature}`;
+};
+
+const json = (res, status, payload) => {
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.end(JSON.stringify(payload));
+};
+
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return json(res, 405, { message: "Method not allowed" });
+  }
+
+  const secret = String(process.env.AUTH_SESSION_SECRET || "").trim();
+  if (!secret) {
+    return json(res, 500, { message: "Servern saknar AUTH_SESSION_SECRET." });
+  }
+
+  const users = parseUsers();
+  if (users.length === 0) {
+    return json(res, 500, { message: "Servern saknar ADMIN_EMAIL/ADMIN_PASSWORD eller AUTH_USERS_JSON." });
+  }
+
+  const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+  const email = String(body.email || "").trim().toLowerCase();
+  const password = String(body.password || "");
+
+  const matched = users.find((item) => item.email === email && item.password === password);
+
+  if (!matched) {
+    return json(res, 401, { message: "Fel e-post eller lösenord." });
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + SESSION_DAYS * 24 * 60 * 60;
+  const role = ["owner", "editor", "viewer", "admin"].includes(matched.role) ? matched.role : "owner";
+
+  const token = buildToken(
+    {
+      sub: matched.email,
+      email: matched.email,
+      role,
+      iat: now,
+      exp,
+    },
+    secret,
+  );
+
+  const cookie = [
+    `${COOKIE_NAME}=${token}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    process.env.NODE_ENV === "production" ? "Secure" : "",
+    `Max-Age=${SESSION_DAYS * 24 * 60 * 60}`,
+  ]
+    .filter(Boolean)
+    .join("; ");
+
+  res.setHeader("Set-Cookie", cookie);
+
+  return json(res, 200, { ok: true });
+}

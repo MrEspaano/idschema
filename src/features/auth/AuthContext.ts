@@ -1,11 +1,19 @@
 import { createContext } from "react";
-import type { Session, User } from "@supabase/supabase-js";
 
 export type AdminAccessRole = "none" | "viewer" | "editor" | "owner" | "admin";
 
+export interface AuthUser {
+  id: string;
+  email: string;
+}
+
+export interface AppSession {
+  expiresAt: string;
+}
+
 export interface AuthContextType {
-  user: User | null;
-  session: Session | null;
+  user: AuthUser | null;
+  session: AppSession | null;
   isAdmin: boolean;
   adminRole: AdminAccessRole;
   loading: boolean;

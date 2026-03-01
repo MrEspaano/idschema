@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowLeft, Save, WandSparkles } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Plus, Save, Trash2, WandSparkles } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/features/auth/useAuth";
@@ -8,15 +8,30 @@ import AppLayout from "@/shared/layout/AppLayout";
 import {
   CHANGING_ROOMS,
   CLASSES,
+  HALLS,
   WEEK_DAYS,
   type ClassName,
+  type WeekDay,
 } from "@/shared/constants/school";
 import { getCurrentWeek } from "@/shared/lib/date";
+
 interface ClassDayHallRow {
   id: string;
   class_name: string;
   day: string;
   hall: string;
+}
+
+interface WeeklyScheduleRow {
+  id: string;
+  day: string;
+  activity: string;
+  hall: string;
+  changing_room: string;
+  cancelled: boolean;
+  is_theory: boolean;
+  bring_change: boolean;
+  bring_laptop: boolean;
 }
 
 interface WeeklyScheduleInsert {
@@ -58,6 +73,17 @@ interface ParsedDraftRow {
   bring_laptop?: boolean;
 }
 
+const createEmptyLessonRow = (day: string, hall = HALLS[0]): LessonRow => ({
+  day,
+  hall,
+  activity: "",
+  changing_room: hall === "Gy-sal" ? "-" : "",
+  cancelled: false,
+  is_theory: false,
+  bring_change: true,
+  bring_laptop: false,
+});
+
 const AdminSchedulePage = () => {
   const { isAdmin, loading: authLoading } = useAuth();
   const navigate = useNavigate();
@@ -80,7 +106,11 @@ const AdminSchedulePage = () => {
 
   useEffect(() => {
     const loadClassStructure = async () => {
-      const data = await apiData<Array<{ id: string; class_name: string; day: string; hall: string }>>("class_day_halls", "list", { className: selectedClass });
+      const data = await apiData<Array<{ id: string; class_name: string; day: string; hall: string }>>(
+        "class_day_halls",
+        "list",
+        { className: selectedClass },
+      );
 
       setClassDayHalls(data ?? []);
     };
@@ -89,35 +119,55 @@ const AdminSchedulePage = () => {
   }, [selectedClass]);
 
   useEffect(() => {
-    if (classDayHalls.length === 0) {
-      setRows([]);
-      return;
-    }
-
     const loadRows = async () => {
-      const data = await apiData<Array<{ id: string; day: string; activity: string; changing_room: string; cancelled: boolean; is_theory: boolean; bring_change: boolean; bring_laptop: boolean }>>("weekly_schedules", "list", { className: selectedClass, weekNumber });
+      const schedules = await apiData<WeeklyScheduleRow[]>("weekly_schedules", "list", {
+        className: selectedClass,
+        weekNumber,
+      });
 
-      const schedules = data ?? [];
+      const baseRows: Array<{ day: string; hall: string }> =
+        classDayHalls.length > 0
+          ? [...classDayHalls]
+              .sort(
+                (a, b) =>
+                  dayOrder.indexOf(a.day as (typeof WEEK_DAYS)[number]) -
+                  dayOrder.indexOf(b.day as (typeof WEEK_DAYS)[number]),
+              )
+              .map((entry) => ({ day: entry.day, hall: entry.hall }))
+          : WEEK_DAYS.map((day) => ({ day, hall: HALLS[0] }));
 
-      const mergedRows: LessonRow[] = [...classDayHalls]
-        .sort((a, b) => dayOrder.indexOf(a.day as (typeof WEEK_DAYS)[number]) - dayOrder.indexOf(b.day as (typeof WEEK_DAYS)[number]))
-        .map((entry) => {
-          const existing = schedules.find((schedule) => schedule.day === entry.day);
+      const mergedRows: LessonRow[] = baseRows.map((entry) => {
+        const existing = (schedules ?? []).find((schedule) => schedule.day === entry.day);
+        const hall = existing?.hall || entry.hall;
 
-          return {
-            id: existing?.id,
-            day: entry.day,
-            hall: entry.hall,
-            activity: existing?.activity || "",
-            changing_room: existing?.changing_room || (entry.hall === "Gy-sal" ? "-" : ""),
-            cancelled: existing?.cancelled ?? false,
-            is_theory: existing?.is_theory ?? false,
-            bring_change: existing?.bring_change ?? true,
-            bring_laptop: existing?.bring_laptop ?? false,
-          };
-        });
+        return {
+          id: existing?.id,
+          day: entry.day,
+          hall,
+          activity: existing?.activity || "",
+          changing_room: existing?.changing_room || (hall === "Gy-sal" ? "-" : ""),
+          cancelled: existing?.cancelled ?? false,
+          is_theory: existing?.is_theory ?? false,
+          bring_change: existing?.bring_change ?? true,
+          bring_laptop: existing?.bring_laptop ?? false,
+        };
+      });
 
-      setRows(mergedRows);
+      const extraRows = (schedules ?? [])
+        .filter((schedule) => !mergedRows.some((row) => row.day === schedule.day))
+        .map((schedule) => ({
+          id: schedule.id,
+          day: schedule.day,
+          hall: schedule.hall || HALLS[0],
+          activity: schedule.activity || "",
+          changing_room: schedule.changing_room || (schedule.hall === "Gy-sal" ? "-" : ""),
+          cancelled: schedule.cancelled ?? false,
+          is_theory: schedule.is_theory ?? false,
+          bring_change: schedule.bring_change ?? true,
+          bring_laptop: schedule.bring_laptop ?? false,
+        }));
+
+      setRows([...mergedRows, ...extraRows]);
     };
 
     loadRows();
@@ -130,11 +180,13 @@ const AdminSchedulePage = () => {
         return;
       }
 
-      const allWeek = await apiData<Array<{ class_name: string; day: string; changing_room: string }>>("weekly_schedules", "list", { weekNumber });
+      const allWeek = await apiData<Array<{ class_name: string; day: string; changing_room: string }>>(
+        "weekly_schedules",
+        "list",
+        { weekNumber },
+      );
 
-      const data = allWeek.filter((item) => item.class_name !== selectedClass);
-
-      const schedules = data ?? [];
+      const schedules = allWeek.filter((item) => item.class_name !== selectedClass);
       const warnings: string[] = [];
 
       for (const row of rows) {
@@ -147,9 +199,7 @@ const AdminSchedulePage = () => {
         );
 
         if (conflict) {
-          warnings.push(
-            `${row.day}: Omkladningsrum ${row.changing_room} anvands redan av ${conflict.class_name}`,
-          );
+          warnings.push(`${row.day}: Omkladningsrum ${row.changing_room} anvands redan av ${conflict.class_name}`);
         }
       }
 
@@ -167,12 +217,26 @@ const AdminSchedulePage = () => {
         [field]: value,
       };
 
-      if (updated[index].hall === "Gy-sal") {
+      if (field === "hall" && updated[index].hall === "Gy-sal") {
         updated[index].changing_room = "-";
+      }
+
+      if (field === "hall" && updated[index].hall !== "Gy-sal" && updated[index].changing_room === "-") {
+        updated[index].changing_room = "";
       }
 
       return updated;
     });
+  };
+
+  const addLessonRow = () => {
+    const usedDays = new Set(rows.map((row) => row.day));
+    const nextDay = WEEK_DAYS.find((day) => !usedDays.has(day)) ?? WEEK_DAYS[0];
+    setRows((current) => [...current, createEmptyLessonRow(nextDay)]);
+  };
+
+  const removeLessonRow = (index: number) => {
+    setRows((current) => current.filter((_, rowIndex) => rowIndex !== index));
   };
 
   const applyDraft = () => {
@@ -196,6 +260,24 @@ const AdminSchedulePage = () => {
 
     const byDay = new Map(filtered.map((item) => [item.day, item]));
 
+    if (rows.length === 0) {
+      const nextRows = filtered.map((item) => ({
+        ...createEmptyLessonRow(item.day, item.hall?.trim() || HALLS[0]),
+        day: item.day,
+        hall: item.hall?.trim() || HALLS[0],
+        activity: item.activity?.trim() || "",
+        changing_room: item.changing_room?.trim() || "",
+        cancelled: item.cancelled ?? false,
+        is_theory: item.is_theory ?? false,
+        bring_change: item.bring_change ?? true,
+        bring_laptop: item.bring_laptop ?? false,
+      }));
+
+      setRows(nextRows);
+      toast.success(`${filtered.length} rader applicerade i formuläret. Granska och klicka Spara schema.`);
+      return;
+    }
+
     setRows((current) =>
       current.map((row) => {
         const next = byDay.get(row.day);
@@ -203,14 +285,13 @@ const AdminSchedulePage = () => {
           return row;
         }
 
+        const hall = next.hall?.trim() || row.hall;
+
         return {
           ...row,
-          hall: next.hall?.trim() || row.hall,
+          hall,
           activity: next.activity?.trim() || row.activity,
-          changing_room:
-            row.hall === "Gy-sal"
-              ? "-"
-              : next.changing_room?.trim() || row.changing_room,
+          changing_room: hall === "Gy-sal" ? "-" : next.changing_room?.trim() || row.changing_room,
           cancelled: next.cancelled ?? row.cancelled,
           is_theory: next.is_theory ?? row.is_theory,
           bring_change: next.bring_change ?? row.bring_change,
@@ -223,7 +304,14 @@ const AdminSchedulePage = () => {
   };
 
   const saveSchedule = async () => {
+    const seenDays = new Set<string>();
     for (const row of rows) {
+      if (seenDays.has(row.day)) {
+        toast.error(`Dagen ${row.day} förekommer flera gånger. Välj unika dagar.`);
+        return;
+      }
+      seenDays.add(row.day);
+
       const changingRoomMissing = !row.changing_room || row.changing_room === "-";
       if (row.activity && row.hall !== "Gy-sal" && changingRoomMissing) {
         toast.error(`${row.day}: Freja-lokaler kräver omklädningsrum.`);
@@ -233,26 +321,28 @@ const AdminSchedulePage = () => {
 
     setSaving(true);
 
-    // handled in replace_for_class_week
-
     const toInsert: WeeklyScheduleInsert[] = rows
       .filter((row) => row.activity.trim() !== "")
-      .map(({ hall, id, ...rest }) => ({
+      .map(({ id, ...rest }) => ({
         ...rest,
-        hall,
         class_name: selectedClass,
         week_number: weekNumber,
         code: "",
       }));
 
-    if (toInsert.length > 0) {
-      await apiData("weekly_schedules", "replace_for_class_week", { className: selectedClass, weekNumber, rows: toInsert });
-      toast.success("Schemat sparat.");
-    } else {
-      toast.success("Schemat rensat.");
+    try {
+      await apiData("weekly_schedules", "replace_for_class_week", {
+        className: selectedClass,
+        weekNumber,
+        rows: toInsert,
+      });
+      toast.success(toInsert.length > 0 ? "Schemat sparat." : "Schemat rensat.");
+    } catch (error) {
+      console.error(error);
+      toast.error("Kunde inte spara schema.");
+    } finally {
+      setSaving(false);
     }
-
-    setSaving(false);
   };
 
   if (authLoading) {
@@ -352,15 +442,69 @@ const AdminSchedulePage = () => {
 
         <section className="space-y-3">
           {rows.map((row, index) => (
-            <article key={row.day} className="space-y-3 rounded-xl border bg-card p-4">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <span className="font-bold">{row.day}</span>
-                  <span className="ml-2 text-sm text-muted-foreground">- {row.hall}</span>
-                </div>
+            <article key={row.id || `${row.day}-${index}`} className="space-y-3 rounded-xl border bg-card p-4">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <label className="space-y-1">
+                  <span className="block text-xs text-muted-foreground">Dag</span>
+                  <select
+                    value={row.day}
+                    onChange={(event) => updateRow(index, "day", event.target.value as WeekDay)}
+                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {WEEK_DAYS.map((day) => (
+                      <option key={day} value={day}>
+                        {day}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-                <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <label className="space-y-1">
+                  <span className="block text-xs text-muted-foreground">Sal</span>
+                  <select
+                    value={row.hall}
+                    onChange={(event) => updateRow(index, "hall", event.target.value)}
+                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {HALLS.map((hall) => (
+                      <option key={hall} value={hall}>
+                        {hall}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <input
+                placeholder="Aktivitet (t.ex. Fotboll)"
+                value={row.activity}
+                onChange={(event) => updateRow(index, "activity", event.target.value)}
+                className="rounded-lg border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+
+              {row.hall !== "Gy-sal" ? (
+                <label className="space-y-1">
+                  <span className="block text-xs text-muted-foreground">Omkladningsrum</span>
+                  <select
+                    value={row.changing_room}
+                    onChange={(event) => updateRow(index, "changing_room", event.target.value)}
+                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="">Valj omklädningsrum</option>
+                    {CHANGING_ROOMS.map((room) => (
+                      <option key={room} value={room}>
+                        {room}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <p className="text-xs italic text-muted-foreground">Gy-sal - inget omklädningsrum eller kod.</p>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                <div className="flex flex-wrap gap-4">
+                  <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
                     <input
                       type="checkbox"
                       checked={row.is_theory}
@@ -369,7 +513,7 @@ const AdminSchedulePage = () => {
                     Teoripass
                   </label>
 
-                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
                     <input
                       type="checkbox"
                       checked={row.cancelled}
@@ -377,38 +521,7 @@ const AdminSchedulePage = () => {
                     />
                     Inställd
                   </label>
-                </div>
-              </div>
 
-              <div className="grid grid-cols-1 gap-2">
-                <input
-                  placeholder="Aktivitet (t.ex. Fotboll)"
-                  value={row.activity}
-                  onChange={(event) => updateRow(index, "activity", event.target.value)}
-                  className="rounded-lg border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                />
-
-                {row.hall !== "Gy-sal" ? (
-                  <label className="space-y-1">
-                    <span className="block text-xs text-muted-foreground">Omkladningsrum</span>
-                    <select
-                      value={row.changing_room}
-                      onChange={(event) => updateRow(index, "changing_room", event.target.value)}
-                      className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <option value="">Valj omklädningsrum</option>
-                      {CHANGING_ROOMS.map((room) => (
-                        <option key={room} value={room}>
-                          {room}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : (
-                  <p className="text-xs italic text-muted-foreground">Gy-sal - inget omklädningsrum eller kod.</p>
-                )}
-
-                <div className="flex flex-wrap gap-4 pt-1">
                   <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
                     <input
                       type="checkbox"
@@ -427,16 +540,26 @@ const AdminSchedulePage = () => {
                     Dator
                   </label>
                 </div>
+
+                <button
+                  onClick={() => removeLessonRow(index)}
+                  className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Ta bort
+                </button>
               </div>
             </article>
           ))}
         </section>
 
-        {rows.length === 0 && (
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            Ingen klassstruktur hittad. Lägg till dagar under Klassstruktur.
-          </p>
-        )}
+        <button
+          onClick={addLessonRow}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border py-3 text-sm font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+        >
+          <Plus className="h-4 w-4" />
+          Lägg till lektion
+        </button>
 
         <button
           onClick={saveSchedule}

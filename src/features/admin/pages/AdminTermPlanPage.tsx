@@ -4,11 +4,27 @@ import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import AppLayout from "@/shared/layout/AppLayout";
 import { useAuth } from "@/features/auth/useAuth";
-import { supabase } from "@/integrations/supabase/client";
-import type { Tables, TablesInsert } from "@/integrations/supabase/types";
+import { apiData } from "@/shared/lib/api";
+interface TermPlanRow {
+  id: string;
+  weeks: string;
+  area: string;
+  description: string;
+  is_assessment: boolean;
+  color: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
 
-type TermPlanRow = Tables<"term_plans">;
-type TermPlanInsert = TablesInsert<"term_plans">;
+interface TermPlanInsert {
+  weeks: string;
+  area: string;
+  description: string;
+  is_assessment: boolean;
+  color: string;
+  sort_order: number;
+}
 
 const COLORS = [
   { value: "teal", label: "Turkos" },
@@ -36,7 +52,7 @@ const AdminTermPlanPage = () => {
   }, []);
 
   const loadPlans = async () => {
-    const { data } = await supabase.from("term_plans").select("*").order("sort_order");
+    const data = await apiData<Array<TermPlanRow>>("term_plans", "list");
     setRows(data ?? []);
   };
 
@@ -74,10 +90,7 @@ const AdminTermPlanPage = () => {
   const save = async () => {
     setSaving(true);
 
-    await supabase
-      .from("term_plans")
-      .delete()
-      .neq("id", "00000000-0000-0000-0000-000000000000");
+    // handled in replace_all
 
     if (rows.length > 0) {
       const toInsert: TermPlanInsert[] = rows.map(({ id, created_at, updated_at, ...rest }, index) => ({
@@ -85,15 +98,9 @@ const AdminTermPlanPage = () => {
         sort_order: index,
       }));
 
-      const { error } = await supabase.from("term_plans").insert(toInsert);
-
-      if (error) {
-        console.error(error);
-        toast.error("Kunde inte spara. Försök igen.");
-      } else {
-        toast.success("Terminsplaneringen sparad.");
-        await loadPlans();
-      }
+      await apiData("term_plans", "replace_all", { rows: toInsert });
+      toast.success("Terminsplaneringen sparad.");
+      await loadPlans();
     } else {
       toast.success("Terminsplaneringen rensad.");
     }

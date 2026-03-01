@@ -4,7 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import AppLayout from "@/shared/layout/AppLayout";
 import { useAuth } from "@/features/auth/useAuth";
-import { supabase } from "@/integrations/supabase/client";
+import { apiData } from "@/shared/lib/api";
 import {
   CLASSES,
   HALLS,
@@ -13,9 +13,6 @@ import {
   type Hall,
   type WeekDay,
 } from "@/shared/constants/school";
-import type { TablesInsert } from "@/integrations/supabase/types";
-
-type ClassDayHallInsert = TablesInsert<"class_day_halls">;
 
 interface DayHallRow {
   id?: string;
@@ -38,11 +35,11 @@ const AdminClassStructurePage = () => {
   }, [authLoading, isAdmin, navigate]);
 
   const loadStructure = useCallback(async () => {
-    const { data } = await supabase
-      .from("class_day_halls")
-      .select("*")
-      .eq("class_name", selectedClass)
-      .order("day");
+    const data = await apiData<Array<{ id: string; day: string; hall: string }>>(
+      "class_day_halls",
+      "list",
+      { className: selectedClass },
+    );
 
     const mapped = (data ?? [])
       .map((item) => ({
@@ -84,28 +81,20 @@ const AdminClassStructurePage = () => {
   const save = async () => {
     setSaving(true);
 
-    await supabase.from("class_day_halls").delete().eq("class_name", selectedClass);
+    try {
+      await apiData("class_day_halls", "replace_for_class", {
+        className: selectedClass,
+        rows: rows.map(({ day, hall }) => ({ day, hall })),
+      });
 
-    if (rows.length > 0) {
-      const toInsert: ClassDayHallInsert[] = rows.map(({ id, ...rest }) => ({
-        ...rest,
-        class_name: selectedClass,
-      }));
-
-      const { error } = await supabase.from("class_day_halls").insert(toInsert);
-
-      if (error) {
-        console.error(error);
-        toast.error("Kunde inte spara klassstrukturen.");
-      } else {
-        toast.success("Klassstrukturen sparad.");
-        await loadStructure();
-      }
-    } else {
-      toast.success("Strukturen rensad.");
+      toast.success(rows.length > 0 ? "Klassstrukturen sparad." : "Strukturen rensad.");
+      await loadStructure();
+    } catch (error) {
+      console.error(error);
+      toast.error("Kunde inte spara klassstrukturen.");
+    } finally {
+      setSaving(false);
     }
-
-    setSaving(false);
   };
 
   if (authLoading) {

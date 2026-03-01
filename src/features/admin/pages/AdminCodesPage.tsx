@@ -4,11 +4,17 @@ import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import AppLayout from "@/shared/layout/AppLayout";
 import { useAuth } from "@/features/auth/useAuth";
-import { supabase } from "@/integrations/supabase/client";
+import { apiData } from "@/shared/lib/api";
 import { CHANGING_ROOMS, WEEK_DAYS } from "@/shared/constants/school";
-import type { Tables } from "@/integrations/supabase/types";
-
-type CodeRow = Tables<"changing_room_codes">;
+interface CodeRow {
+  id: string;
+  week_number: number;
+  day: string;
+  changing_room: string;
+  code: string;
+  created_at: string;
+  updated_at: string;
+}
 type ImportCodeRow = Omit<CodeRow, "id" | "created_at" | "updated_at">;
 
 interface ParseResult {
@@ -40,17 +46,7 @@ const AdminCodesPage = () => {
   }, [authLoading, isAdmin, navigate]);
 
   const loadCodes = useCallback(async () => {
-    let query = supabase
-      .from("changing_room_codes")
-      .select("*")
-      .order("week_number")
-      .order("day");
-
-    if (weekFilter !== "") {
-      query = query.eq("week_number", weekFilter);
-    }
-
-    const { data } = await query;
+    const data = await apiData<Array<CodeRow>>("changing_room_codes", "list", { weekNumber: weekFilter === "" ? null : weekFilter });
     setCodes(data ?? []);
   }, [weekFilter]);
 
@@ -62,17 +58,7 @@ const AdminCodesPage = () => {
     async (parsed: ParseResult) => {
       const weeks = [...new Set(parsed.rows.map((row) => row.week_number))];
 
-      for (const week of weeks) {
-        await supabase.from("changing_room_codes").delete().eq("week_number", week);
-      }
-
-      const { error } = await supabase.from("changing_room_codes").insert(parsed.rows);
-
-      if (error) {
-        console.error(error);
-        toast.error("Kunde inte importera. Kontrollera formatet och försök igen.");
-        return;
-      }
+      await apiData("changing_room_codes", "replace_weeks", { rows: parsed.rows });
 
       toast.success(`${parsed.rows.length} koder importerade (${parsed.detectedFormat}).`);
 
@@ -140,7 +126,7 @@ const AdminCodesPage = () => {
   };
 
   const deleteWeek = async (weekNumber: number) => {
-    await supabase.from("changing_room_codes").delete().eq("week_number", weekNumber);
+    await apiData("changing_room_codes", "delete_week", { weekNumber });
     toast.success(`Vecka ${weekNumber} borttagen.`);
     await loadCodes();
   };

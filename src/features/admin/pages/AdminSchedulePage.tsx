@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowLeft, Save, WandSparkles } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/features/auth/useAuth";
-import { supabase } from "@/integrations/supabase/client";
+import { apiData } from "@/shared/lib/api";
 import AppLayout from "@/shared/layout/AppLayout";
 import {
   CHANGING_ROOMS,
@@ -12,10 +12,26 @@ import {
   type ClassName,
 } from "@/shared/constants/school";
 import { getCurrentWeek } from "@/shared/lib/date";
-import type { Tables, TablesInsert } from "@/integrations/supabase/types";
+interface ClassDayHallRow {
+  id: string;
+  class_name: string;
+  day: string;
+  hall: string;
+}
 
-type ClassDayHallRow = Tables<"class_day_halls">;
-type WeeklyScheduleInsert = TablesInsert<"weekly_schedules">;
+interface WeeklyScheduleInsert {
+  week_number: number;
+  class_name: string;
+  day: string;
+  activity: string;
+  hall: string;
+  changing_room: string;
+  code: string;
+  cancelled: boolean;
+  is_theory: boolean;
+  bring_change: boolean;
+  bring_laptop: boolean;
+}
 
 interface LessonRow {
   id?: string;
@@ -64,11 +80,7 @@ const AdminSchedulePage = () => {
 
   useEffect(() => {
     const loadClassStructure = async () => {
-      const { data } = await supabase
-        .from("class_day_halls")
-        .select("*")
-        .eq("class_name", selectedClass)
-        .order("day");
+      const data = await apiData<Array<{ id: string; class_name: string; day: string; hall: string }>>("class_day_halls", "list", { className: selectedClass });
 
       setClassDayHalls(data ?? []);
     };
@@ -83,11 +95,7 @@ const AdminSchedulePage = () => {
     }
 
     const loadRows = async () => {
-      const { data } = await supabase
-        .from("weekly_schedules")
-        .select("*")
-        .eq("class_name", selectedClass)
-        .eq("week_number", weekNumber);
+      const data = await apiData<Array<{ id: string; day: string; activity: string; changing_room: string; cancelled: boolean; is_theory: boolean; bring_change: boolean; bring_laptop: boolean }>>("weekly_schedules", "list", { className: selectedClass, weekNumber });
 
       const schedules = data ?? [];
 
@@ -122,11 +130,9 @@ const AdminSchedulePage = () => {
         return;
       }
 
-      const { data } = await supabase
-        .from("weekly_schedules")
-        .select("class_name, day, changing_room")
-        .eq("week_number", weekNumber)
-        .neq("class_name", selectedClass);
+      const allWeek = await apiData<Array<{ class_name: string; day: string; changing_room: string }>>("weekly_schedules", "list", { weekNumber });
+
+      const data = allWeek.filter((item) => item.class_name !== selectedClass);
 
       const schedules = data ?? [];
       const warnings: string[] = [];
@@ -227,11 +233,7 @@ const AdminSchedulePage = () => {
 
     setSaving(true);
 
-    await supabase
-      .from("weekly_schedules")
-      .delete()
-      .eq("class_name", selectedClass)
-      .eq("week_number", weekNumber);
+    // handled in replace_for_class_week
 
     const toInsert: WeeklyScheduleInsert[] = rows
       .filter((row) => row.activity.trim() !== "")
@@ -244,14 +246,8 @@ const AdminSchedulePage = () => {
       }));
 
     if (toInsert.length > 0) {
-      const { error } = await supabase.from("weekly_schedules").insert(toInsert);
-
-      if (error) {
-        console.error(error);
-        toast.error("Kunde inte spara. Försök igen.");
-      } else {
-        toast.success("Schemat sparat.");
-      }
+      await apiData("weekly_schedules", "replace_for_class_week", { className: selectedClass, weekNumber, rows: toInsert });
+      toast.success("Schemat sparat.");
     } else {
       toast.success("Schemat rensat.");
     }

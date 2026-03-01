@@ -12,14 +12,30 @@ import {
   XCircle,
 } from "lucide-react";
 import AppLayout from "@/shared/layout/AppLayout";
-import { supabase } from "@/integrations/supabase/client";
+import { apiData } from "@/shared/lib/api";
 import { getCurrentWeek } from "@/shared/lib/date";
 import { CLASSES, type ClassName, WEEK_DAYS } from "@/shared/constants/school";
-import type { Tables } from "@/integrations/supabase/types";
+interface ClassDayHallRow {
+  day: string;
+  hall: string;
+}
 
-type ClassDayHallRow = Tables<"class_day_halls">;
-type WeeklyScheduleRow = Tables<"weekly_schedules">;
-type ChangingCodeRow = Tables<"changing_room_codes">;
+interface WeeklyScheduleRow {
+  day: string;
+  activity: string;
+  hall: string;
+  changing_room: string;
+  cancelled: boolean;
+  is_theory: boolean;
+  bring_change: boolean;
+  bring_laptop: boolean;
+}
+
+interface ChangingCodeRow {
+  day: string;
+  changing_room: string;
+  code: string;
+}
 
 interface ScheduleDisplay {
   day: string;
@@ -50,25 +66,11 @@ const WeeklySchedulePage = () => {
     const fetchSchedule = async () => {
       setLoading(true);
 
-      const [hallsRes, schedulesRes, codesRes] = await Promise.all([
-        supabase
-          .from("class_day_halls")
-          .select("*")
-          .eq("class_name", selectedClass),
-        supabase
-          .from("weekly_schedules")
-          .select("*")
-          .eq("class_name", selectedClass)
-          .eq("week_number", currentWeek),
-        supabase
-          .from("changing_room_codes")
-          .select("*")
-          .eq("week_number", currentWeek),
+      const [halls, schedules, codes] = await Promise.all([
+        apiData<Array<ClassDayHallRow>>("class_day_halls", "list", { className: selectedClass }),
+        apiData<Array<WeeklyScheduleRow>>("weekly_schedules", "list", { className: selectedClass, weekNumber: currentWeek }),
+        apiData<Array<ChangingCodeRow>>("changing_room_codes", "list", { weekNumber: currentWeek }),
       ]);
-
-      const halls = hallsRes.data ?? [];
-      const schedules = schedulesRes.data ?? [];
-      const codes = codesRes.data ?? [];
 
       const merged = halls
         .map((hallEntry) => mapLesson(hallEntry, schedules, codes))

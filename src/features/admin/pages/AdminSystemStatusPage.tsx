@@ -3,7 +3,7 @@ import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, RefreshCw } from "lucide
 import { Link, useNavigate } from "react-router-dom";
 import AppLayout from "@/shared/layout/AppLayout";
 import { useAuth } from "@/features/auth/useAuth";
-import { SUPABASE_CONFIG } from "@/integrations/supabase/client";
+import { apiData } from "@/shared/lib/api";
 
 interface HealthItem {
   id: string;
@@ -31,9 +31,9 @@ const AdminSystemStatusPage = () => {
   const navigate = useNavigate();
 
   const [items, setItems] = useState<HealthItem[]>([
-    { id: "supabase", name: "Supabase auth health", status: "loading", details: "Kontrollerar..." },
-    { id: "proxy", name: "Vercel auth proxy", status: "loading", details: "Kontrollerar..." },
-    { id: "client", name: "Klientkonfiguration", status: "loading", details: "Kontrollerar..." },
+    { id: "session", name: "Auth-session", status: "loading", details: "Kontrollerar..." },
+    { id: "api", name: "API-router", status: "loading", details: "Kontrollerar..." },
+    { id: "neon", name: "Neon databas", status: "loading", details: "Kontrollerar..." },
   ]);
   const [checking, setChecking] = useState(false);
 
@@ -49,49 +49,61 @@ const AdminSystemStatusPage = () => {
     const next: HealthItem[] = [];
 
     try {
-      const response = await withTimeout(`${SUPABASE_CONFIG.url}/auth/v1/health`, 8000);
+      const response = await withTimeout("/api/auth/session", 8000, { method: "GET", credentials: "include" });
       next.push({
-        id: "supabase",
-        name: "Supabase auth health",
+        id: "session",
+        name: "Auth-session",
         status: response.ok ? "ok" : "error",
         details: `HTTP ${response.status}`,
       });
     } catch (error) {
       next.push({
-        id: "supabase",
-        name: "Supabase auth health",
+        id: "session",
+        name: "Auth-session",
         status: "error",
         details: error instanceof Error ? error.message : "Okänt fel",
       });
     }
 
     try {
-      const response = await withTimeout("/api/auth/password-login", 8000, { method: "OPTIONS" });
-      const isOk = response.status === 405 || response.ok;
+      const response = await withTimeout("/api/data", 8000, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ resource: "health", action: "ping", payload: {} }),
+      });
 
       next.push({
-        id: "proxy",
-        name: "Vercel auth proxy",
-        status: isOk ? "ok" : "error",
+        id: "api",
+        name: "API-router",
+        status: response.ok ? "ok" : "error",
         details: `HTTP ${response.status}`,
       });
     } catch (error) {
       next.push({
-        id: "proxy",
-        name: "Vercel auth proxy",
+        id: "api",
+        name: "API-router",
         status: "error",
         details: error instanceof Error ? error.message : "Okänt fel",
       });
     }
 
-    const hasConfig = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.publishableKey);
-
-    next.push({
-      id: "client",
-      name: "Klientkonfiguration",
-      status: hasConfig ? "ok" : "error",
-      details: hasConfig ? "Supabase URL och key hittade" : "Saknar konfiguration",
-    });
+    try {
+      const data = await apiData<{ now: string | null; sessionRole: string }>("health", "ping");
+      next.push({
+        id: "neon",
+        name: "Neon databas",
+        status: data?.now ? "ok" : "error",
+        details: data?.now ? `Svarar (${data.now})` : "Ingen tid returnerad",
+      });
+    } catch (error) {
+      next.push({
+        id: "neon",
+        name: "Neon databas",
+        status: "error",
+        details: error instanceof Error ? error.message : "Okänt fel",
+      });
+    }
 
     setItems(next);
     setChecking(false);
@@ -124,7 +136,7 @@ const AdminSystemStatusPage = () => {
           </Link>
           <div>
             <h1 className="text-xl font-bold tracking-tight">Systemstatus</h1>
-            <p className="text-sm text-muted-foreground">Översikt över auth och driftsstatus.</p>
+            <p className="text-sm text-muted-foreground">Översikt över auth, API och Neon.</p>
           </div>
         </header>
 

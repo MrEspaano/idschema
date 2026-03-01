@@ -1,14 +1,18 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, BookOpen } from "lucide-react";
 import AppLayout from "@/shared/layout/AppLayout";
-import { supabase } from "@/integrations/supabase/client";
+import { apiData } from "@/shared/lib/api";
 import {
   fallbackTermPlan,
   type FallbackTermPlanBlock,
 } from "@/features/term-plan/data/fallbackTermPlan";
-import type { Tables } from "@/integrations/supabase/types";
-
-type TermPlanRow = Tables<"term_plans">;
+interface TermPlanRow {
+  weeks: string;
+  area: string;
+  description: string;
+  is_assessment: boolean;
+  color: string;
+}
 
 type TermPlanBlock = Pick<
   TermPlanRow,
@@ -29,7 +33,7 @@ const TermPlanningPage = () => {
 
   useEffect(() => {
     const fetchTermPlan = async () => {
-      const { data } = await supabase.from("term_plans").select("*").order("sort_order");
+      const data = await apiData<Array<TermPlanRow>>("term_plans", "list");
 
       if (data && data.length > 0) {
         setBlocks(data);

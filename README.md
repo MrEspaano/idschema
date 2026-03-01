@@ -1,41 +1,55 @@
-# Idschema
+# IDSchema
 
-Webbapp for idrott och halsa med elevvy och adminvy, byggd med React, Vite, Tailwind och Supabase.
+Webbapp för veckoschema och terminsplanering.
 
-## Kommandon
+## Driftmodell (Neon + egen auth)
+
+Appen använder nu:
+- Neon Postgres för all data
+- Vercel Functions (`/api/*`) för datalager och auth
+- Cookie-baserad session för admin-login
+
+Supabase används inte längre i runtime.
+
+## Miljövariabler i Vercel
+
+### Obligatoriska
+- `NEON_DATABASE_URL`
+- `AUTH_SESSION_SECRET`
+
+### Minst en av dessa inloggningsmodeller
+- Enkel admin:
+  - `ADMIN_EMAIL`
+  - `ADMIN_PASSWORD`
+  - (valfri) `ADMIN_ROLE` (`owner`/`editor`/`viewer`/`admin`)
+- Flera användare:
+  - `AUTH_USERS_JSON`
+
+Exempel `AUTH_USERS_JSON`:
+
+```json
+[{"email":"erik.espemyr@falkoping.se","password":"byt-losenord","role":"owner"}]
+```
+
+## Sätt upp Neon-schema
+
+1. Öppna Neon SQL Editor.
+2. Kör innehållet i:
+
+`neon_schema.sql`
+
+Det skapar alla tabeller som appen behöver.
+
+## Lokal utveckling
 
 ```bash
 npm install
 npm run dev
-npm run build
-npm run lint
-npm run test
 ```
 
-## Miljovariabler
-
-Skapa en `.env` med:
+## Bygg
 
 ```bash
-VITE_SUPABASE_URL=...
-VITE_SUPABASE_PUBLISHABLE_KEY=...
+npm run lint
+npm run build
 ```
-
-## Struktur
-
-```text
-src/
-  app/                # App shell (providers + router)
-  features/           # Domanspecifika features (admin, auth, schedule, term-plan, site)
-  shared/             # Delade konstanter, layout och helpers
-  integrations/       # Externa klienter (Supabase)
-  lib/                # Smala utility-funktioner
-```
-
-## Notering
-
-Projektet ar refaktorerat fran en aldre Lovable-export med fokus pa:
-
-- tydligare feature-struktur
-- mindre beroende- och filyta
-- enhetliga Tailwind/CSS-tokens

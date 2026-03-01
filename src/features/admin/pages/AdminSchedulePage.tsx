@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowLeft, Plus, Save, Trash2 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -88,6 +88,8 @@ const AdminSchedulePage = () => {
   const [rows, setRows] = useState<LessonRow[]>([]);
   const [saving, setSaving] = useState(false);
   const [conflicts, setConflicts] = useState<string[]>([]);
+  const structureLoadIdRef = useRef(0);
+  const rowsLoadIdRef = useRef(0);
 
   const dayOrder = useMemo(() => WEEK_DAYS, []);
 
@@ -124,11 +126,17 @@ const AdminSchedulePage = () => {
 
   useEffect(() => {
     const loadClassStructure = async () => {
+      const requestId = ++structureLoadIdRef.current;
+      setClassDayHalls([]);
       const data = await apiData<Array<{ id: string; class_name: string; day: string; hall: string }>>(
         "class_day_halls",
         "list",
         { className: selectedClass },
       );
+
+      if (requestId !== structureLoadIdRef.current) {
+        return;
+      }
 
       setClassDayHalls(data ?? []);
     };
@@ -138,6 +146,8 @@ const AdminSchedulePage = () => {
 
   useEffect(() => {
     const loadRows = async () => {
+      const requestId = ++rowsLoadIdRef.current;
+      setRows([]);
       const schedules = await apiData<WeeklyScheduleRow[]>("weekly_schedules", "list", {
         className: selectedClass,
         weekNumber,
@@ -186,6 +196,10 @@ const AdminSchedulePage = () => {
           bring_change: schedule.bring_change ?? true,
           bring_laptop: schedule.bring_laptop ?? false,
         }));
+
+      if (requestId !== rowsLoadIdRef.current) {
+        return;
+      }
 
       setRows([...mergedRows, ...extraRows]);
     };

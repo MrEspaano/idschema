@@ -16,6 +16,37 @@ const sections = [
 
 type SectionKey = (typeof sections)[number]["key"];
 
+const classSortKey = (value: string): { grade: number; suffix: string; raw: string } => {
+  const raw = value.trim();
+  const match = raw.match(/^(\d+)\s*([A-Za-zÅÄÖa-zåäö]*)$/);
+  if (!match) {
+    return { grade: Number.MAX_SAFE_INTEGER, suffix: "", raw };
+  }
+
+  return {
+    grade: Number(match[1]),
+    suffix: (match[2] || "").toUpperCase(),
+    raw,
+  };
+};
+
+const sortClasses = (classes: string[]): string[] =>
+  [...classes].sort((a, b) => {
+    const left = classSortKey(a);
+    const right = classSortKey(b);
+
+    if (left.grade !== right.grade) {
+      return left.grade - right.grade;
+    }
+
+    const suffixDiff = left.suffix.localeCompare(right.suffix, "sv");
+    if (suffixDiff !== 0) {
+      return suffixDiff;
+    }
+
+    return left.raw.localeCompare(right.raw, "sv");
+  });
+
 const AdminMasterDataPage = () => {
   const { isAdmin, adminRole, loading: authLoading, user } = useAuth();
   const navigate = useNavigate();
@@ -33,7 +64,10 @@ const AdminMasterDataPage = () => {
   }, [authLoading, isAdmin, navigate]);
 
   useEffect(() => {
-    setDraft(config);
+    setDraft({
+      ...config,
+      classes: sortClasses(config.classes),
+    });
   }, [config]);
 
   const isChanged = useMemo(() => JSON.stringify(draft) !== JSON.stringify(config), [config, draft]);
@@ -64,7 +98,7 @@ const AdminMasterDataPage = () => {
     setSaving(true);
 
     const cleaned = {
-      classes: draft.classes.map((item) => item.trim()).filter(Boolean),
+      classes: sortClasses(draft.classes.map((item) => item.trim()).filter(Boolean)),
       weekDays: draft.weekDays.map((item) => item.trim()).filter(Boolean),
       halls: draft.halls.map((item) => item.trim()).filter(Boolean),
       changingRooms: draft.changingRooms.map((item) => item.trim()).filter(Boolean),
